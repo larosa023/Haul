@@ -325,7 +325,7 @@ pub fn open_themes_folder() {
 
 #[tauri::command]
 pub fn system_theme() -> serde_json::Value {
-    serde_json::json!({ "accent": assoc::accent_color(), "light": assoc::apps_use_light_theme() })
+    serde_json::json!({ "accent": assoc::accent_color(), "light": assoc::apps_use_light_theme(), "backdrop": assoc::supports_backdrop() })
 }
 
 #[tauri::command]

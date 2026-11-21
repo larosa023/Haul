@@ -143,6 +143,17 @@ mod imp {
         Some(format!("#{r:02x}{g:02x}{b:02x}"))
     }
 
+    /// Mica/Acrylic backdrops need Windows 11 22H2 (build 22621) or later.
+    pub fn supports_backdrop() -> bool {
+        RegKey::predef(HKEY_LOCAL_MACHINE)
+            .open_subkey(r"SOFTWARE\Microsoft\Windows NT\CurrentVersion")
+            .and_then(|k| k.get_value::<String, _>("CurrentBuild"))
+            .ok()
+            .and_then(|b| b.parse::<u32>().ok())
+            .map(|b| b >= 22621)
+            .unwrap_or(false)
+    }
+
     pub fn apps_use_light_theme() -> bool {
         hkcu()
             .open_subkey(r"Software\Microsoft\Windows\CurrentVersion\Themes\Personalize")
@@ -169,6 +180,9 @@ mod imp {
         None
     }
     pub fn apps_use_light_theme() -> bool {
+        false
+    }
+    pub fn supports_backdrop() -> bool {
         false
     }
 }
