@@ -43,6 +43,8 @@ struct Runtime {
     meta: HashMap<u64, tokio::task::JoinHandle<()>>,
     /// Torrents waiting for the user to pick files in the Add dialog.
     awaiting: HashSet<u64>,
+    /// Their file lists, once known (shown one dialog at a time).
+    pending: Vec<TorrentMetaView>,
     /// Per torrent: which live session we've configured and the upload count before it.
     live: HashMap<u64, (usize, u64)>,
     /// Smoothed speeds.
@@ -888,10 +890,9 @@ async fn on_meta(id: u64, meta: torrent::Meta) {
         }
     });
     if awaiting {
-        emit(
-            "torrent-meta",
-            TorrentMetaView { id, name: meta.name.clone(), hash: meta.hash.clone(), files: meta.files.clone(), folder: base, category, size: total },
-        );
+        let view = TorrentMetaView { id, name: meta.name.clone(), hash: meta.hash.clone(), files: meta.files.clone(), folder: base, category, size: total };
+        rt().pending.push(view.clone());
+        emit("torrent-meta", view);
         crate::show_main_window();
     } else {
         let prio = vec![2u8; meta.files.len()];
@@ -911,8 +912,17 @@ pub struct TorrentConfirm {
     pub category: String,
 }
 
+/// Torrents whose file list is waiting for the user (the UI shows them one at a time).
+pub fn pending_meta() -> Vec<TorrentMetaView> {
+    rt().pending.clone()
+}
+
 pub async fn confirm_torrent(c: TorrentConfirm) -> Result<(), String> {
-    rt().awaiting.remove(&c.id);
+    {
+        let mut r = rt();
+        r.awaiting.remove(&c.id);
+        r.pending.retain(|p| p.id != c.id);
+    }
     let Some(it) = model::with(|st| st.get(c.id).cloned()) else { return Err("gone".into()) };
     let files = torrent::files(&it.info_hash);
     let mut prio = c.priorities.clone();
@@ -947,7 +957,11 @@ pub async fn confirm_torrent(c: TorrentConfirm) -> Result<(), String> {
 
 /// The user closed the file dialog without adding.
 pub async fn cancel_torrent(id: u64) {
-    rt().awaiting.remove(&id);
+    {
+        let mut r = rt();
+        r.awaiting.remove(&id);
+        r.pending.retain(|p| p.id != id);
+    }
     remove(vec![id], false).await;
 }
 
@@ -1039,6 +1053,7 @@ pub async fn remove(ids: Vec<u64>, delete_files: bool) {
         r.live.remove(&id);
         r.retry_at.remove(&id);
         r.awaiting.remove(&id);
+        r.pending.retain(|p| p.id != id);
         r.sources.remove(&id);
     }
     model::save_if_dirty();

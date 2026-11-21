@@ -394,7 +394,7 @@
                 <span class="pv-side"></span>
                 <span class="pv-main"><span class="pv-row"></span><span class="pv-row short"></span><span class="pv-bar"></span></span>
               </span>
-              <span class="tn">{t.name}{#if t.backdrop !== 'none'}<span class="faint"> · {t.backdrop === 'acrylic' ? 'Acrylic' : 'Mica'}</span>{/if}</span>
+              <span class="tn">{t.name}{#if t.backdrop !== 'none'}<span class="faint">&nbsp;· {t.backdrop === 'acrylic' ? 'Acrylic' : 'Mica'}</span>{/if}</span>
             </button>
           {/each}
         </div>

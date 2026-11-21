@@ -142,6 +142,8 @@ export function listenAll() {
     selectOnly(id);
   });
   on<TorrentMeta>('torrent-meta', (meta) => {
+    // One file picker at a time; others wait (see nextPending).
+    if (ui.dialog) return;
     ui.view = 'list';
     ui.dialog = { kind: 'torrent', meta };
   });
@@ -161,4 +163,14 @@ export function listenAll() {
 /** Re-sync order after the backend moved things. */
 export async function refreshOrder(order?: number[]) {
   app.order = order ?? (await api.order());
+}
+
+/** Opens the next torrent waiting for its files to be picked, if any. */
+export async function nextPending() {
+  if (ui.dialog) return;
+  const list = await api.pendingTorrents().catch(() => []);
+  if (list.length && !ui.dialog) {
+    ui.view = 'list';
+    ui.dialog = { kind: 'torrent', meta: list[0] };
+  }
 }

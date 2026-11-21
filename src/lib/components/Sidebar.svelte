@@ -52,8 +52,10 @@
   {/if}
 
   <div class="speeds">
-    <div class="sp"><Icon name="download" size={14} /><span>{speed(t?.down ?? 0) || '0 B/s'}</span></div>
-    <div class="sp"><Icon name="upload" size={14} /><span>{speed(t?.up ?? 0) || '0 B/s'}</span></div>
+    <div class="sps">
+      <div class="sp" title="Download speed"><Icon name="download" size={14} /><span>{speed(t?.down ?? 0) || '0 B/s'}</span></div>
+      <div class="sp" title="Upload speed"><Icon name="upload" size={14} /><span>{speed(t?.up ?? 0) || '0 B/s'}</span></div>
+    </div>
     <button
       class="icon-btn alt"
       class:on={alt || t?.alt}
@@ -91,7 +93,9 @@
   .spacer { flex: 1; }
   .engine { display: flex; gap: 7px; align-items: center; font-size: 12px; color: var(--warn); padding: 6px 10px; }
   .speeds { display: flex; align-items: center; gap: 10px; padding: 8px 4px 8px 10px; border-top: 1px solid var(--line); margin-top: 4px; }
-  .sp { display: flex; align-items: center; gap: 5px; font-size: 12px; color: var(--text-2); font-variant-numeric: tabular-nums; min-width: 0; flex: 1; white-space: nowrap; }
+  .sps { flex: 1; display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+  .sp { display: flex; align-items: center; gap: 7px; font-size: 12px; color: var(--text-2); font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .sp :global(svg) { flex-shrink: 0; }
   .alt { width: 30px; height: 30px; }
   .settings .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--accent); }
 </style>

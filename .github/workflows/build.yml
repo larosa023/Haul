@@ -83,6 +83,47 @@ jobs:
           if (-not (Test-Path $marker)) { throw "Haul didn't start and draw its window" }
           Write-Host "Haul started and reported healthy"
 
+      - name: Update test (install, healthy check, and rollback of a broken update)
+        shell: pwsh
+        run: |
+          $root = "$PWD\uptest"
+          $env:LOCALAPPDATA = "$root\local"
+          $data = "$root\local\Haul"
+          New-Item -ItemType Directory -Force "$root\app", "$data\updates\backup", "$root\new" | Out-Null
+          Copy-Item out\Haul.exe "$root\app\Haul.exe"
+          Copy-Item out\Haul.exe "$data\updates\backup\Haul.exe"
+          $orig = (Get-FileHash "$root\app\Haul.exe").Hash
+          function Plan($file, $to) {
+            @{ portable = $true; file = $file; target_exe = "$root\app\Haul.exe"; install_dir = "$root\app"; backup_dir = "$data\updates\backup";
+               from = "0.1.0"; to = $to; parent_pid = 999999; data_dir = $data; guardian = "$root\guard.exe" } | ConvertTo-Json | Set-Content "$root\plan.json"
+          }
+          Copy-Item out\Haul.exe "$root\guard.exe"
+
+          # 1) A good update: the new version starts and reports healthy.
+          Copy-Item out\Haul.exe "$root\new\Haul.exe"
+          Plan "$root\new\Haul.exe" "9.9.9"
+          $g = Start-Process "$root\guard.exe" -ArgumentList "--guard", "$root\plan.json" -PassThru
+          if (-not $g.WaitForExit(120000)) { throw "guardian hung" }
+          Get-Process haul -ErrorAction SilentlyContinue | Stop-Process -Force
+          Get-Content "$data\haul.log" -ErrorAction SilentlyContinue
+          if ($g.ExitCode -ne 0) { throw "good update: guardian exit $($g.ExitCode)" }
+
+          # 2) A broken update: it exits at once, so the guardian must put the old exe back.
+          Copy-Item "$env:SystemRoot\System32\whoami.exe" "$root\new\broken.exe"
+          New-Item -ItemType Directory -Force "$data\updates\backup" | Out-Null
+          Copy-Item out\Haul.exe "$data\updates\backup\Haul.exe"
+          Plan "$root\new\broken.exe" "9.9.8"
+          $g = Start-Process "$root\guard.exe" -ArgumentList "--guard", "$root\plan.json" -PassThru
+          if (-not $g.WaitForExit(120000)) { throw "guardian hung" }
+          Start-Sleep -Seconds 3
+          Get-Process haul -ErrorAction SilentlyContinue | Stop-Process -Force
+          Get-Content "$data\haul.log" -ErrorAction SilentlyContinue
+          if ($g.ExitCode -ne 2) { throw "broken update: expected rollback (2), got $($g.ExitCode)" }
+          if ((Get-FileHash "$root\app\Haul.exe").Hash -ne $orig) { throw "rollback didn't restore Haul.exe" }
+          $skip = (Get-Content "$data\settings.json" | ConvertFrom-Json).skipVersion
+          if ($skip -ne "9.9.8") { throw "rolled-back version not skipped ($skip)" }
+          Write-Host "Update and rollback work"
+
       - uses: actions/upload-artifact@v4
         with:
           name: haul-${{ steps.version.outputs.version }}

@@ -28,7 +28,8 @@ mod imp {
         Ok(k)
     }
 
-    pub fn register() -> std::io::Result<()> {
+    /// `classic`: also point the plain `.torrent` / `magnet` keys at Haul (not just its own ProgIDs).
+    pub fn register(classic: bool) -> std::io::Result<()> {
         let exe = exe();
         let cmd = format!("\"{exe}\" \"%1\"");
         let icon = format!("\"{exe}\",0");
@@ -40,16 +41,23 @@ mod imp {
         m.set_value("URL Protocol", &"")?;
         set_default(r"Software\Classes\Haul.Magnet\DefaultIcon", &icon)?;
         set_default(r"Software\Classes\Haul.Magnet\shell\open\command", &cmd)?;
-        // The classic keys (used when nothing else was chosen in Default Apps)
-        let (t, _) = hkcu().create_subkey(r"Software\Classes\.torrent")?;
-        t.set_value("", &"Haul.Torrent")?;
-        t.set_value("Content Type", &"application/x-bittorrent")?;
         let (owp, _) = hkcu().create_subkey(r"Software\Classes\.torrent\OpenWithProgids")?;
         owp.set_value("Haul.Torrent", &"")?;
-        let mg = set_default(r"Software\Classes\magnet", "URL:Magnet link")?;
-        mg.set_value("URL Protocol", &"")?;
-        set_default(r"Software\Classes\magnet\DefaultIcon", &icon)?;
-        set_default(r"Software\Classes\magnet\shell\open\command", &cmd)?;
+        // The classic keys (used when nothing else was chosen in Default Apps)
+        let classic_ours = hkcu()
+            .open_subkey(r"Software\Classes\magnet\shell\open\command")
+            .and_then(|k| k.get_value::<String, _>(""))
+            .map(|v| v.to_ascii_lowercase().contains("haul"))
+            .unwrap_or(false);
+        if classic || classic_ours {
+            let (t, _) = hkcu().create_subkey(r"Software\Classes\.torrent")?;
+            t.set_value("", &"Haul.Torrent")?;
+            t.set_value("Content Type", &"application/x-bittorrent")?;
+            let mg = set_default(r"Software\Classes\magnet", "URL:Magnet link")?;
+            mg.set_value("URL Protocol", &"")?;
+            set_default(r"Software\Classes\magnet\DefaultIcon", &icon)?;
+            set_default(r"Software\Classes\magnet\shell\open\command", &cmd)?;
+        }
         // Default Apps listing
         let (cap, _) = hkcu().create_subkey(r"Software\Haul\Capabilities")?;
         cap.set_value("ApplicationName", &"Haul")?;
@@ -166,7 +174,7 @@ mod imp {
 #[cfg(not(windows))]
 mod imp {
     use super::HandlerState;
-    pub fn register() -> std::io::Result<()> {
+    pub fn register(_classic: bool) -> std::io::Result<()> {
         Ok(())
     }
     pub fn unregister() {}

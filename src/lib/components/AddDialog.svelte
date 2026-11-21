@@ -13,7 +13,7 @@
   // svelte-ignore state_referenced_locally
   let name = $state(request?.filename ?? '');
   let folder = $state('');
-  let category = $state('');
+  let category = $state('Other');
   let sha256 = $state('');
   let paused = $state(false);
   let probe: ProbeInfo | null = $state(null);

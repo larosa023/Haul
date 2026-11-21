@@ -210,6 +210,7 @@ export const api = {
   confirmTorrent: (confirm: { id: number; folder: string; priorities: number[]; paused: boolean; sequential: boolean; category: string }) =>
     call<void>('confirm_torrent', { confirm }),
   cancelTorrent: (id: number) => call<void>('cancel_torrent', { id }),
+  pendingTorrents: () => call<TorrentMeta[]>('pending_torrents'),
   pause: (ids: number[]) => call<void>('pause', { ids }),
   resume: (ids: number[]) => call<void>('resume', { ids }),
   remove: (ids: number[], deleteFiles: boolean) => call<void>('remove', { ids, deleteFiles }),

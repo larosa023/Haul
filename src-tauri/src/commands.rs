@@ -53,7 +53,7 @@ pub async fn set_settings(new: Settings) -> R<Settings> {
     }
     if old.register_handlers != saved.register_handlers {
         if saved.register_handlers {
-            assoc::register().map_err(|e| e.to_string())?;
+            assoc::register(true).map_err(|e| e.to_string())?;
         } else {
             assoc::unregister();
         }
@@ -132,6 +132,11 @@ pub async fn add_torrent(mut add: TorrentAdd) -> R<engine::AddResult> {
 #[tauri::command]
 pub async fn confirm_torrent(confirm: TorrentConfirm) -> R<()> {
     engine::confirm_torrent(confirm).await
+}
+
+#[tauri::command]
+pub fn pending_torrents() -> Vec<engine::TorrentMetaView> {
+    engine::pending_meta()
 }
 
 #[tauri::command]
@@ -253,7 +258,7 @@ pub fn handler_state() -> assoc::HandlerState {
 
 #[tauri::command]
 pub fn make_default() -> R<()> {
-    assoc::register().map_err(|e| e.to_string())?;
+    assoc::register(true).map_err(|e| e.to_string())?;
     settings::update(|s| s.register_handlers = true);
     // Windows only lets the user pick defaults; this opens Haul's page in Default Apps.
     let _ = tauri_plugin_opener::open_url("ms-settings:defaultapps?registeredAppUser=Haul", None::<&str>);

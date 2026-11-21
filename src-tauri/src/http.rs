@@ -412,6 +412,7 @@ pub async fn run(id: u64, ctl: Arc<Control>) -> Result<(), Fail> {
         let (dir, name) = model::with(|st| {
             let taken: Vec<String> = st.items.iter().filter(|i| i.id != id).map(|i| i.file_name.clone()).collect();
             let it = st.get_mut(id).unwrap();
+            let auto_name = it.file_name.is_empty();
             if it.category.is_empty() {
                 it.category = p.info.category.clone();
             }
@@ -423,7 +424,7 @@ pub async fn run(id: u64, ctl: Arc<Control>) -> Result<(), Fail> {
             // Our own partial file from an earlier attempt can be reused.
             let reuse = dir.join(format!("{wanted}.haul")).exists() && !dir.join(&wanted).exists();
             it.file_name = if reuse { wanted } else { model::unique_name(&dir, &wanted, &taken) };
-            if it.name.is_empty() || it.name == it.source {
+            if auto_name || it.name.is_empty() {
                 it.name = it.file_name.clone();
             }
             it.size = size;

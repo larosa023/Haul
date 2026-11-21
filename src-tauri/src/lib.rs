@@ -122,10 +122,12 @@ pub fn run() {
             let handle = app.handle().clone();
             notify::register();
             let s = settings::get();
+            if s.register_handlers {
+                // First run takes over magnet / .torrent; later runs only keep Haul's own
+                // entries pointing at this exe (in case it moved).
+                let _ = assoc::register(!s.initialized);
+            }
             if !s.initialized {
-                if s.register_handlers {
-                    let _ = assoc::register();
-                }
                 settings::update(|s| s.initialized = true);
             }
             if s.launch_at_startup {
@@ -202,6 +204,7 @@ pub fn run() {
             commands::add_torrent,
             commands::confirm_torrent,
             commands::cancel_torrent,
+            commands::pending_torrents,
             commands::pause,
             commands::resume,
             commands::remove,
