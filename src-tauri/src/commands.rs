@@ -37,10 +37,37 @@ pub fn get_state() -> AppState {
     }
 }
 
+/// The extension files, built into Haul so portable copies have them too.
+const EXTENSION_FILES: &[(&str, &[u8])] = &[
+    ("manifest.json", include_bytes!("../../extension/manifest.json")),
+    ("background.js", include_bytes!("../../extension/background.js")),
+    ("alt-click.js", include_bytes!("../../extension/alt-click.js")),
+    ("popup.html", include_bytes!("../../extension/popup.html")),
+    ("popup.js", include_bytes!("../../extension/popup.js")),
+    ("icons/16.png", include_bytes!("../../extension/icons/16.png")),
+    ("icons/32.png", include_bytes!("../../extension/icons/32.png")),
+    ("icons/48.png", include_bytes!("../../extension/icons/48.png")),
+    ("icons/128.png", include_bytes!("../../extension/icons/128.png")),
+];
+
 fn extension_dir() -> std::path::PathBuf {
     let p = paths::get();
     let shipped = p.exe_dir.join("extension");
-    if shipped.is_dir() { shipped } else { p.exe_dir.join("resources").join("extension") }
+    if shipped.join("manifest.json").is_file() {
+        return shipped;
+    }
+    // Portable (or a manual copy): unpack the built-in copy next to Haul's data.
+    let dir = p.data.join("extension");
+    for (name, bytes) in EXTENSION_FILES {
+        let f = dir.join(name);
+        if std::fs::read(&f).map(|b| b != *bytes).unwrap_or(true) {
+            if let Some(parent) = f.parent() {
+                let _ = std::fs::create_dir_all(parent);
+            }
+            let _ = std::fs::write(&f, bytes);
+        }
+    }
+    dir
 }
 
 /// Saves settings and applies whatever changed.
