@@ -1,0 +1,125 @@
+name: Build
+
+# Every push builds and tests on Windows. A push to main whose version (src-tauri/tauri.conf.json)
+# has no release yet publishes one: the installer, a portable Haul.exe, the browser extension and
+# SHA256SUMS.txt. Versions with a "-" (0.2.0-beta.1) are published as pre-releases (Beta channel).
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+
+      - run: npm ci
+      - run: npm run check
+      - run: npm test
+      - run: npm run build
+
+      - name: Rust tests
+        working-directory: src-tauri
+        run: cargo test --lib
+
+      - name: Version
+        id: version
+        shell: bash
+        run: |
+          VER=$(node -p "require('./src-tauri/tauri.conf.json').version")
+          echo "version=$VER" >> "$GITHUB_OUTPUT"
+          if gh release view "v$VER" >/dev/null 2>&1; then echo "exists=true" >> "$GITHUB_OUTPUT"; else echo "exists=false" >> "$GITHUB_OUTPUT"; fi
+          if [[ "$VER" == *-* ]]; then echo "pre=true" >> "$GITHUB_OUTPUT"; else echo "pre=false" >> "$GITHUB_OUTPUT"; fi
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build installer
+        run: npx tauri build
+
+      - name: Collect release files
+        shell: pwsh
+        run: |
+          $ver = "${{ steps.version.outputs.version }}"
+          New-Item -ItemType Directory -Force out | Out-Null
+          Copy-Item "src-tauri/target/release/bundle/nsis/Haul_${ver}_x64-setup.exe" out/
+          Copy-Item "src-tauri/target/release/haul.exe" out/Haul.exe
+          Compress-Archive -Path extension/* -DestinationPath out/Haul-extension.zip
+          $lines = Get-ChildItem out -File | ForEach-Object { "{0}  {1}" -f (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower(), $_.Name }
+          [IO.File]::WriteAllText("$PWD/out/SHA256SUMS.txt", ($lines -join "`n") + "`n")
+          Get-Content out/SHA256SUMS.txt
+          Get-ChildItem out | Format-Table Name, Length
+
+      - name: Smoke test (starts, draws, reports healthy)
+        shell: pwsh
+        run: |
+          $env:LOCALAPPDATA = "$PWD\smoke"
+          New-Item -ItemType Directory -Force smoke\Haul\updates | Out-Null
+          $p = Start-Process -FilePath out\Haul.exe -ArgumentList "--after-update","0.0.0-smoke" -PassThru
+          $marker = "smoke\Haul\updates\healthy-0.0.0-smoke"
+          for ($i = 0; $i -lt 60 -and -not (Test-Path $marker); $i++) { Start-Sleep -Seconds 1 }
+          Get-Content smoke\Haul\haul.log -ErrorAction SilentlyContinue
+          Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
+          if (-not (Test-Path $marker)) { throw "Haul didn't start and draw its window" }
+          Write-Host "Haul started and reported healthy"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: haul-${{ steps.version.outputs.version }}
+          path: out/*
+
+      - name: Publish release
+        if: github.ref == 'refs/heads/main' && steps.version.outputs.exists == 'false'
+        shell: bash
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          VER=${{ steps.version.outputs.version }}
+          NOTES=$(awk -v v="$VER" '$0 ~ "^## "v {f=1; next} /^## / {f=0} f' CHANGELOG.md)
+          [ -z "$NOTES" ] && NOTES="Haul $VER"
+          PRE=""
+          [ "${{ steps.version.outputs.pre }}" = "true" ] && PRE="--prerelease"
+          gh release create "v$VER" out/* --title "Haul v$VER" --notes "$NOTES" --target "$GITHUB_SHA" $PRE
+
+  torrent-test:
+    # Downloads part of a well-seeded public-domain torrent through Haul's engine (real network).
+    runs-on: windows-latest
+    timeout-minutes: 30
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - name: Real torrent
+        working-directory: src-tauri
+        env:
+          HAUL_TEST_TORRENT: '1'
+        run: cargo test --lib real_torrent -- --nocapture --test-threads=1
