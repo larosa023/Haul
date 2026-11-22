@@ -83,6 +83,8 @@ export function matchesSearch(item, q) {
 export function linkKind(text) {
   const t = String(text ?? '').trim();
   if (/^magnet:\?/i.test(t)) return 'torrent';
+  // A .torrent file on disk (opened from Explorer).
+  if (/^([a-z]:\\|\\\\)/i.test(t) && /\.torrent$/i.test(t)) return 'torrent';
   try {
     const u = new URL(t);
     if (u.protocol !== 'http:' && u.protocol !== 'https:') return null;

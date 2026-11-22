@@ -12,7 +12,7 @@ use tauri::{AppHandle, Emitter};
 
 use crate::http::{self, Control, Fail};
 use crate::model::{self, Item, Kind, Status};
-use crate::{extract, notify, paths, settings, sorter, torrent};
+use crate::{debrid, extract, notify, paths, settings, sorter, torrent};
 
 static APP: OnceLock<AppHandle> = OnceLock::new();
 
@@ -57,6 +57,10 @@ struct Runtime {
     sent: HashMap<u64, u64>,
     /// Source bytes for torrents added from a file, until their metadata is read.
     sources: HashMap<u64, Vec<u8>>,
+    /// Real-Debrid torrents being followed.
+    debrid_jobs: HashMap<u64, tokio::task::JoinHandle<()>>,
+    /// Real-Debrid file ids, in the order the file picker showed them.
+    rd_files: HashMap<u64, Vec<u64>>,
 }
 
 static RT: OnceLock<Mutex<Runtime>> = OnceLock::new();
@@ -227,6 +231,21 @@ async fn tick(dt: f64) {
             Err(f) => {
                 http::log_fail(id, &f);
                 let permanent = matches!(f, Fail::Permanent(_));
+                // A Real-Debrid link that stopped working: get a fresh one once and carry on.
+                let renew = permanent
+                    && model::with(|st| {
+                        st.get_mut(id)
+                            .filter(|it| !it.debrid_link.is_empty() && !it.debrid_renewed && !f.text().starts_with("Real-Debrid"))
+                            .map(|it| {
+                                it.debrid_renewed = true;
+                                it.source.clear();
+                                it.status = Status::Queued;
+                            })
+                            .is_some()
+                    });
+                if renew {
+                    continue;
+                }
                 model::with(|st| {
                     if let Some(it) = st.get_mut(id) {
                         it.status = Status::Error;
@@ -376,6 +395,17 @@ async fn tick(dt: f64) {
         }
     }
 
+    // ---- Real-Debrid torrents (followed until they become direct downloads)
+    let jobs: Vec<u64> = model::with(|st| {
+        st.items.iter().filter(|i| i.kind == Kind::Debrid && !i.paused && i.status != Status::Error).map(|i| i.id).collect()
+    });
+    for id in jobs {
+        let running = rt().debrid_jobs.get(&id).map(|h| !h.is_finished()).unwrap_or(false);
+        if !running {
+            start_debrid(id);
+        }
+    }
+
     // ---- tell the UI
     let mut changed = Vec::new();
     let mut downloading = 0;
@@ -442,7 +472,7 @@ async fn schedule(s: &settings::Settings, engine_running: bool) {
             .iter()
             .enumerate()
             .filter(|(_, i)| !i.paused && !i.is_finished() && i.status != Status::Error && i.status != Status::Metadata)
-            .filter(|(_, i)| i.kind == Kind::Http || !i.file_prio.is_empty())
+            .filter(|(_, i)| i.kind == Kind::Http || (i.kind == Kind::Torrent && !i.file_prio.is_empty()))
             .map(|(pos, i)| (i.priority, pos, i.id, i.kind))
             .collect()
     });
@@ -470,6 +500,8 @@ async fn schedule(s: &settings::Settings, engine_running: bool) {
                     set_status(*id, Status::Queued);
                 }
             }
+            // Followed by its own job (it's downloading on Real-Debrid's side).
+            Kind::Debrid => {}
             Kind::Torrent => {
                 let hash = model::with(|st| st.get(*id).map(|i| i.info_hash.clone())).unwrap_or_default();
                 if !engine_running {
@@ -708,6 +740,8 @@ pub struct HttpAdd {
     pub connections: u32,
     pub paused: bool,
     pub priority: i8,
+    /// Get the file through Real-Debrid (decided by the caller).
+    pub debrid: bool,
 }
 
 pub fn add_http(a: HttpAdd) -> Result<u64, String> {
@@ -726,7 +760,9 @@ pub fn add_http(a: HttpAdd) -> Result<u64, String> {
             kind: Kind::Http,
             name: if a.name.trim().is_empty() { http::url_name(&url).unwrap_or_else(|| url.clone()) } else { name.clone() },
             file_name: if a.name.trim().is_empty() { String::new() } else { name.clone() },
-            source: url.clone(),
+            // Real-Debrid links get their direct link when they start (see http::run).
+            source: if a.debrid { String::new() } else { url.clone() },
+            debrid_link: if a.debrid { url.clone() } else { String::new() },
             referrer: a.referrer,
             cookies: a.cookies,
             user_agent: a.user_agent,
@@ -755,6 +791,8 @@ pub struct TorrentAdd {
     pub bytes: Option<Vec<u8>>,
     /// Skip the file-picking dialog.
     pub direct: bool,
+    /// Download through Real-Debrid (None = Settings decide).
+    pub debrid: Option<bool>,
 }
 
 #[derive(Serialize, Clone)]
@@ -765,6 +803,7 @@ pub struct AddResult {
 }
 
 pub fn add_torrent(a: TorrentAdd) -> Result<AddResult, String> {
+    let via_debrid = a.debrid.unwrap_or_else(|| settings::with(|s| s.debrid_torrents == "always")) && debrid::active();
     let src = a.source.trim().to_string();
     let bytes: Vec<u8> = if let Some(b) = a.bytes {
         b
@@ -790,9 +829,13 @@ pub fn add_torrent(a: TorrentAdd) -> Result<AddResult, String> {
             .unwrap_or_else(|| hash.clone())
     };
     let show_dialog = settings::with(|s| s.show_add_dialog) && !a.direct;
+    if via_debrid && !is_magnet {
+        std::fs::create_dir_all(paths::get().torrents()).ok();
+        let _ = std::fs::write(torrent::torrent_file_path(&hash), &bytes);
+    }
     let id = model::with(|st| {
         st.insert(Item {
-            kind: Kind::Torrent,
+            kind: if via_debrid { Kind::Debrid } else { Kind::Torrent },
             name,
             source: if is_magnet { src.clone() } else { format!("magnet:?xt=urn:btih:{hash}") },
             info_hash: hash.clone(),
@@ -810,7 +853,11 @@ pub fn add_torrent(a: TorrentAdd) -> Result<AddResult, String> {
         }
         r.sources.insert(id, bytes);
     }
-    start_meta(id);
+    if via_debrid {
+        start_debrid(id);
+    } else {
+        start_meta(id);
+    }
     Ok(AddResult { id, existing: false })
 }
 
@@ -824,6 +871,8 @@ pub struct TorrentMetaView {
     pub folder: String,
     pub category: String,
     pub size: u64,
+    /// Files are picked for Real-Debrid (no per-file priority).
+    pub debrid: bool,
 }
 
 fn start_meta(id: u64) {
@@ -890,7 +939,7 @@ async fn on_meta(id: u64, meta: torrent::Meta) {
         }
     });
     if awaiting {
-        let view = TorrentMetaView { id, name: meta.name.clone(), hash: meta.hash.clone(), files: meta.files.clone(), folder: base, category, size: total };
+        let view = TorrentMetaView { id, name: meta.name.clone(), hash: meta.hash.clone(), files: meta.files.clone(), folder: base, category, size: total, debrid: false };
         rt().pending.push(view.clone());
         emit("torrent-meta", view);
         crate::show_main_window();
@@ -924,6 +973,26 @@ pub async fn confirm_torrent(c: TorrentConfirm) -> Result<(), String> {
         r.pending.retain(|p| p.id != c.id);
     }
     let Some(it) = model::with(|st| st.get(c.id).cloned()) else { return Err("gone".into()) };
+    if it.kind == Kind::Debrid {
+        // Real-Debrid: remember the choice; the job tells Real-Debrid.
+        let ids = rt().rd_files.get(&c.id).cloned().unwrap_or_default();
+        let picked: Vec<u64> = ids.iter().zip(c.priorities.iter().chain(std::iter::repeat(&2))).filter(|(_, p)| **p > 0).map(|(id, _)| *id).collect();
+        if picked.is_empty() {
+            return Err("Pick at least one file".into());
+        }
+        model::with(|st| {
+            if let Some(i) = st.get_mut(c.id) {
+                i.debrid_files = if picked.len() == ids.len() { vec![] } else { picked.clone() };
+                i.save_dir = paths::expand_env(&c.folder);
+                if !c.category.is_empty() {
+                    i.category = c.category.clone();
+                }
+                i.paused = c.paused;
+                i.note.clear();
+            }
+        });
+        return Ok(());
+    }
     let files = torrent::files(&it.info_hash);
     let mut prio = c.priorities.clone();
     prio.resize(files.len(), 2);
@@ -965,6 +1034,187 @@ pub async fn cancel_torrent(id: u64) {
     remove(vec![id], false).await;
 }
 
+// ---------------------------------------------------------------- Real-Debrid torrents
+
+fn start_debrid(id: u64) {
+    let h = tauri::async_runtime::spawn(async move {
+        if let Err(e) = debrid_job(id).await {
+            paths::log(format!("real-debrid {id}: {e}"));
+            set_error(id, &e);
+        }
+    });
+    let tauri::async_runtime::JoinHandle::Tokio(h) = h;
+    if let Some(old) = rt().debrid_jobs.insert(id, h) {
+        old.abort();
+    }
+}
+
+fn transient(e: &str) -> bool {
+    e.starts_with("Couldn't reach") || e.contains("busy")
+}
+
+/// Adds the torrent to Real-Debrid (once), lets the user pick files, follows Real-Debrid's
+/// progress, then turns the finished files into direct downloads.
+async fn debrid_job(id: u64) -> Result<(), String> {
+    let Some(it) = model::with(|st| st.get(id).cloned()) else { return Ok(()) };
+    let mut rd = it.debrid_id.clone();
+    if rd.is_empty() {
+        let saved = rt().sources.get(&id).cloned();
+        let bytes = saved
+            .or_else(|| std::fs::read(torrent::torrent_file_path(&it.info_hash)).ok())
+            .unwrap_or_else(|| it.source.clone().into_bytes());
+        rd = if bytes.starts_with(b"magnet:") {
+            debrid::add_magnet(&String::from_utf8_lossy(&bytes)).await?
+        } else {
+            debrid::add_torrent_file(bytes).await?
+        };
+        model::with(|st| st.get_mut(id).map(|i| i.debrid_id = rd.clone()));
+        rt().sources.remove(&id);
+    }
+    let mut selected = false;
+    let mut shown_picker = false;
+    loop {
+        let info = match debrid::info(&rd).await {
+            Ok(i) => i,
+            Err(e) if transient(&e) => {
+                tokio::time::sleep(Duration::from_secs(10)).await;
+                continue;
+            }
+            Err(e) => return Err(e),
+        };
+        let phase = debrid::phase(&info.status);
+        model::with(|st| {
+            if let Some(i) = st.get_mut(id) {
+                if !info.filename.is_empty() {
+                    i.name = info.filename.clone();
+                }
+                if info.bytes > 0 {
+                    i.size = info.bytes;
+                    i.done = ((info.progress.clamp(0.0, 100.0) / 100.0) * info.bytes as f64) as u64;
+                }
+                i.eta = if info.speed > 0 && i.size > i.done { ((i.size - i.done) / info.speed) as i64 } else { -1 };
+                match phase {
+                    debrid::Phase::Converting | debrid::Phase::PickFiles => i.status = Status::Metadata,
+                    debrid::Phase::Working => i.status = Status::Downloading,
+                    _ => {}
+                }
+                if !matches!(phase, debrid::Phase::PickFiles) || !rt().awaiting.contains(&id) {
+                    let speed = if info.speed > 0 { format!(" · {}/s", human(info.speed)) } else { String::new() };
+                    i.note = format!("{}{speed}", debrid::status_note(&info));
+                }
+            }
+        });
+        match phase {
+            debrid::Phase::Converting | debrid::Phase::Working => {}
+            debrid::Phase::PickFiles => {
+                if rt().awaiting.contains(&id) {
+                    if !shown_picker {
+                        shown_picker = true;
+                        let files: Vec<(String, u64)> = info.files.iter().map(|f| (f.path.trim_start_matches('/').to_string(), f.bytes)).collect();
+                        let total: u64 = files.iter().map(|f| f.1).sum();
+                        let (category, folder) = suggest_folder(&info.filename, &files, &it.source);
+                        rt().rd_files.insert(id, info.files.iter().map(|f| f.id).collect());
+                        model::with(|st| {
+                            st.get_mut(id).map(|i| {
+                                i.size = total;
+                                i.category = category.clone();
+                                i.note = "Choose files to start".into();
+                            })
+                        });
+                        let view = TorrentMetaView { id, name: info.filename.clone(), hash: info.hash.clone(), files, folder, category, size: total, debrid: true };
+                        rt().pending.push(view.clone());
+                        emit("torrent-meta", view);
+                        crate::show_main_window();
+                    }
+                } else if !selected {
+                    selected = true;
+                    let picked = model::with(|st| st.get(id).map(|i| i.debrid_files.clone())).unwrap_or_default();
+                    debrid::select_files(&rd, &picked).await?;
+                }
+            }
+            debrid::Phase::Ready => return finish_debrid(id, &info).await,
+            debrid::Phase::Failed(e) => return Err(e),
+        }
+        let wait = if matches!(phase, debrid::Phase::Working) { 4 } else { 2 };
+        tokio::time::sleep(Duration::from_secs(wait)).await;
+    }
+}
+
+fn human(b: u64) -> String {
+    let mb = b as f64 / 1_048_576.0;
+    if mb >= 1.0 { format!("{mb:.1} MB") } else { format!("{:.0} KB", b as f64 / 1024.0) }
+}
+
+/// Real-Debrid has the files: each becomes a normal multi-connection download. The first one
+/// takes this item's place in the list.
+async fn finish_debrid(id: u64, info: &debrid::TorrentInfo) -> Result<(), String> {
+    let Some(it) = model::with(|st| st.get(id).cloned()) else { return Ok(()) };
+    if info.links.is_empty() {
+        return Err("Real-Debrid finished but returned no files".into());
+    }
+    let selected: Vec<&debrid::RdFile> = info.files.iter().filter(|f| f.selected == 1).collect();
+    let (category, base) = if it.save_dir.is_empty() {
+        let files: Vec<(String, u64)> = selected.iter().map(|f| (f.path.trim_start_matches('/').to_string(), f.bytes)).collect();
+        suggest_folder(&info.filename, &files, &it.source)
+    } else {
+        (it.category.clone(), it.save_dir.clone())
+    };
+    let count = selected.len().max(info.links.len());
+    let dir = torrent_dir(&base, &info.filename, count);
+    let root = model::sanitize(&info.filename);
+    let mut entries = Vec::new();
+    for (n, link) in info.links.iter().enumerate() {
+        model::with(|st| st.get_mut(id).map(|i| i.note = format!("Real-Debrid: getting links {}/{}", n + 1, info.links.len())));
+        let u = loop {
+            match debrid::unrestrict(link, "").await {
+                Ok(u) => break u,
+                Err(e) if transient(&e) => tokio::time::sleep(Duration::from_secs(5)).await,
+                Err(e) => return Err(e),
+            }
+        };
+        // Keep the torrent's folders when links line up with files (one link per file).
+        let rel = if info.links.len() == selected.len() { selected[n].path.trim_start_matches('/').to_string() } else { u.filename.clone() };
+        let mut parts: Vec<String> = rel.split('/').filter(|p| !p.is_empty()).map(model::sanitize).collect();
+        if parts.len() > 1 && parts[0] == root && count > 1 {
+            parts.remove(0); // the torrent's own top folder is already `dir`
+        }
+        let file = parts.pop().unwrap_or_else(|| model::sanitize(&u.filename));
+        let folder = parts.iter().fold(std::path::PathBuf::from(&dir), |p, c| p.join(c));
+        entries.push((folder.to_string_lossy().to_string(), file, u.download, link.clone(), u.filesize));
+    }
+    model::with(|st| {
+        for (n, (folder, file, url, link, size)) in entries.into_iter().enumerate() {
+            let template = Item {
+                kind: Kind::Http,
+                name: file.clone(),
+                file_name: file,
+                source: url,
+                debrid_link: link,
+                save_dir: folder,
+                category: category.clone(),
+                size,
+                priority: it.priority,
+                limit_down: it.limit_down,
+                status: Status::Queued,
+                ratio_limit: -1.0,
+                seed_time_limit: -1,
+                eta: -1,
+                ..Default::default()
+            };
+            if n == 0 {
+                if let Some(i) = st.get_mut(id) {
+                    let added = i.added;
+                    *i = Item { id, added, debrid_id: i.debrid_id.clone(), info_hash: i.info_hash.clone(), ..template };
+                }
+            } else {
+                st.insert(template);
+            }
+        }
+    });
+    rt().rd_files.remove(&id);
+    Ok(())
+}
+
 // ---------------------------------------------------------------- actions
 
 pub async fn pause(ids: Vec<u64>) {
@@ -982,6 +1232,12 @@ pub async fn pause(ids: Vec<u64>) {
                     h.abort();
                 }
                 torrent::pause(&it.info_hash).await;
+            }
+            // Real-Debrid keeps working on its side; Haul just stops following it.
+            Kind::Debrid => {
+                if let Some(h) = rt().debrid_jobs.remove(&id) {
+                    h.abort();
+                }
             }
         }
         model::with(|st| {
@@ -1005,7 +1261,7 @@ pub fn resume(ids: Vec<u64>) {
                     i.error.clear();
                     i.retries = 0;
                 }
-                if i.kind == Kind::Torrent && i.file_prio.is_empty() {
+                if (i.kind == Kind::Torrent && i.file_prio.is_empty()) || i.kind == Kind::Debrid {
                     i.status = Status::Metadata;
                 } else if !i.is_finished() {
                     i.status = Status::Queued;
@@ -1034,6 +1290,14 @@ pub async fn remove(ids: Vec<u64>, delete_files: bool) {
                     let _ = std::fs::remove_file(it.file_path());
                 }
             }
+            Kind::Debrid => {
+                if let Some(h) = rt().debrid_jobs.remove(&id) {
+                    h.abort();
+                }
+                if !it.debrid_id.is_empty() {
+                    debrid::delete(&it.debrid_id).await;
+                }
+            }
             Kind::Torrent => {
                 if !it.info_hash.is_empty() {
                     let others = model::with(|st| st.items.iter().filter(|i| i.id != id && i.info_hash == it.info_hash).count());
@@ -1055,6 +1319,7 @@ pub async fn remove(ids: Vec<u64>, delete_files: bool) {
         r.awaiting.remove(&id);
         r.pending.retain(|p| p.id != id);
         r.sources.remove(&id);
+        r.rd_files.remove(&id);
     }
     model::save_if_dirty();
 }
@@ -1235,6 +1500,7 @@ pub fn item_path(id: u64) -> Option<std::path::PathBuf> {
             let p = it.file_path();
             if p.exists() { Some(p) } else { Some(std::path::PathBuf::from(&it.save_dir)) }
         }
+        Kind::Debrid => Some(std::path::PathBuf::from(&it.save_dir)),
         Kind::Torrent => {
             let files = torrent::files(&it.info_hash);
             let dir = std::path::PathBuf::from(&it.save_dir);
@@ -1286,5 +1552,117 @@ mod tests {
     fn torrent_dirs() {
         assert_eq!(torrent_dir("D:/V", "Show: S1", 3), std::path::Path::new("D:/V").join("Show_ S1").to_string_lossy());
         assert_eq!(torrent_dir("D:/V", "x", 1), "D:/V");
+    }
+
+    /// The whole Real-Debrid torrent flow against a fake Real-Debrid: add the magnet, wait for
+    /// the file list, pick files, follow the download, then turn the result into downloads.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn real_debrid_torrent_flow() {
+        use std::sync::atomic::{AtomicU32, Ordering};
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let dir = std::env::temp_dir().join(format!("haul-rd-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        std::env::set_var("LOCALAPPDATA", &dir);
+
+        let l = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let port = l.local_addr().unwrap().port();
+        let polls = Arc::new(AtomicU32::new(0));
+        let selected = Arc::new(Mutex::new(String::new()));
+        let (p2, s2) = (polls.clone(), selected.clone());
+        tokio::spawn(async move {
+            loop {
+                let (mut sock, _) = l.accept().await.unwrap();
+                let (polls, selected) = (p2.clone(), s2.clone());
+                tokio::spawn(async move {
+                    let mut buf = vec![0u8; 16384];
+                    let n = sock.read(&mut buf).await.unwrap_or(0);
+                    let req = String::from_utf8_lossy(&buf[..n]).to_string();
+                    let line = req.lines().next().unwrap_or("").to_string();
+                    let authed = req.to_ascii_lowercase().contains("authorization: bearer key123");
+                    let body = req.split("\r\n\r\n").nth(1).unwrap_or("").to_string();
+                    let (code, json) = if !authed {
+                        ("401 Unauthorized", r#"{"error":"bad_token","error_code":8}"#.to_string())
+                    } else if line.starts_with("POST /torrents/addMagnet") {
+                        ("201 Created", r#"{"id":"T1","uri":"x"}"#.to_string())
+                    } else if line.starts_with("POST /torrents/selectFiles/T1") {
+                        *selected.lock() = body;
+                        ("204 No Content", String::new())
+                    } else if line.starts_with("GET /torrents/info/T1") {
+                        let n = polls.fetch_add(1, Ordering::SeqCst);
+                        let picked = !selected.lock().is_empty();
+                        let status = if n == 0 { "magnet_conversion" } else if !picked { "waiting_files_selection" } else if n < 4 { "downloading" } else { "downloaded" };
+                        let links = if status == "downloaded" { r#"["https://real-debrid.com/d/AAA","https://real-debrid.com/d/BBB"]"# } else { "[]" };
+                        let sel = if picked { 1 } else { 0 };
+                        (
+                            "200 OK",
+                            format!(
+                                r#"{{"id":"T1","filename":"My Show","hash":"dd8255ecdc7ca55fb0bbf81323d87062db1f6d1c","bytes":3000,"progress":{},"status":"{status}","speed":2097152,"seeders":9,
+                                "files":[{{"id":1,"path":"/My Show/S01/e1.mkv","bytes":2000,"selected":{sel}}},{{"id":2,"path":"/My Show/sample.mkv","bytes":10,"selected":0}},{{"id":3,"path":"/My Show/S01/e2.mkv","bytes":1000,"selected":{sel}}}],
+                                "links":{links}}}"#,
+                                if status == "downloaded" { 100 } else { 40 }
+                            ),
+                        )
+                    } else if line.starts_with("POST /unrestrict/link") {
+                        let which = if body.contains("AAA") { "e1.mkv" } else { "e2.mkv" };
+                        ("200 OK", format!(r#"{{"filename":"{which}","filesize":123,"download":"https://download.example/{which}","host":"real-debrid.com"}}"#))
+                    } else {
+                        ("404 Not Found", r#"{"error":"unknown","error_code":7}"#.to_string())
+                    };
+                    let out = format!("HTTP/1.1 {code}\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{json}", json.len());
+                    let _ = sock.write_all(out.as_bytes()).await;
+                });
+            }
+        });
+        let _ = debrid::TEST_BASE.set(format!("http://127.0.0.1:{port}"));
+        settings::update(|s| {
+            s.debrid_key = crate::secret::seal("key123");
+            s.debrid_enabled = true;
+            s.show_add_dialog = true;
+            s.download_dir = dir.join("dl").to_string_lossy().to_string();
+            s.sort_enabled = false;
+        });
+
+        // Add through Real-Debrid with the file picker.
+        let magnet = "magnet:?xt=urn:btih:dd8255ecdc7ca55fb0bbf81323d87062db1f6d1c&dn=My+Show";
+        let r = add_torrent(TorrentAdd { source: magnet.into(), debrid: Some(true), ..Default::default() }).unwrap();
+        let id = r.id;
+        assert_eq!(model::with(|st| st.get(id).unwrap().kind), Kind::Debrid);
+        // The picker appears once Real-Debrid has the file list; pick e1 and e2, skip the sample.
+        let mut tries = 0;
+        while pending_meta().is_empty() {
+            tokio::time::sleep(Duration::from_millis(200)).await;
+            tries += 1;
+            assert!(tries < 100, "file picker never came");
+        }
+        let meta = pending_meta()[0].clone();
+        assert!(meta.debrid);
+        assert_eq!(meta.files.len(), 3);
+        let out = dir.join("chosen").to_string_lossy().to_string();
+        confirm_torrent(TorrentConfirm { id, folder: out.clone(), priorities: vec![2, 0, 2], paused: false, sequential: false, category: "Video".into() })
+            .await
+            .unwrap();
+        // Follow it to the end.
+        let mut tries = 0;
+        while model::with(|st| st.get(id).map(|i| i.kind)) == Some(Kind::Debrid) {
+            tokio::time::sleep(Duration::from_millis(250)).await;
+            tries += 1;
+            assert!(tries < 200, "never finished: {:?}", model::with(|st| st.get(id).map(|i| (i.status, i.error.clone(), i.note.clone()))));
+        }
+        assert_eq!(selected.lock().as_str(), "files=1%2C3");
+        let items: Vec<Item> = model::with(|st| st.items.iter().filter(|i| i.debrid_link.starts_with("https://real-debrid.com/d/")).cloned().collect());
+        assert_eq!(items.len(), 2);
+        let first = items.iter().find(|i| i.id == id).expect("the item becomes the first download");
+        assert_eq!(first.kind, Kind::Http);
+        assert_eq!(first.file_name, "e1.mkv");
+        assert_eq!(first.source, "https://download.example/e1.mkv");
+        let base = std::path::Path::new(&out).join("My Show");
+        assert_eq!(std::path::PathBuf::from(&first.save_dir), base.join("S01"));
+        assert_eq!(first.category, "Video");
+        let second = items.iter().find(|i| i.id != id).unwrap();
+        assert_eq!(second.file_name, "e2.mkv");
+        assert_eq!(std::path::PathBuf::from(&second.save_dir), base.join("S01"));
+
+        // A bad key gives a plain-language error.
+        assert!(debrid::account_for("wrong").await.unwrap_err().contains("API key"));
     }
 }

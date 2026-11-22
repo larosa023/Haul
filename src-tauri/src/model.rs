@@ -13,6 +13,8 @@ pub enum Kind {
     #[default]
     Http,
     Torrent,
+    /// A torrent Real-Debrid downloads first; becomes direct download(s) when it's ready.
+    Debrid,
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Debug, Default)]
@@ -113,6 +115,17 @@ pub struct Item {
     pub seed_time_limit: i64,
     pub seeding_secs: u64,
 
+    // Real-Debrid
+    /// The link Real-Debrid unrestricts (hoster link, or a Real-Debrid torrent link). Kept so an
+    /// expired download link can be renewed.
+    pub debrid_link: String,
+    /// Real-Debrid torrent id (Debrid items).
+    pub debrid_id: String,
+    /// Real-Debrid file ids picked (Debrid items; empty = all).
+    pub debrid_files: Vec<u64>,
+    /// The download link was already renewed once after failing.
+    pub debrid_renewed: bool,
+
     pub extracted: bool,
     pub notified: bool,
 
@@ -182,6 +195,7 @@ impl Item {
             "peers": self.peers,
             "note": self.note,
             "fileCount": if self.kind == Kind::Torrent { self.file_prio.len() } else { 1 },
+            "debrid": !self.debrid_link.is_empty() || self.kind == Kind::Debrid,
         })
     }
 }

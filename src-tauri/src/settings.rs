@@ -131,6 +131,15 @@ pub struct Settings {
     pub bind_adapter: String,
     pub preallocate: bool,
 
+    // Debrid (Real-Debrid)
+    pub debrid_enabled: bool,
+    /// The API key, encrypted for this Windows account (see secret.rs).
+    pub debrid_key: String,
+    /// Send links from supported file hosters through Real-Debrid.
+    pub debrid_hosters: bool,
+    /// Torrents through Real-Debrid: "off" | "ask" | "always".
+    pub debrid_torrents: String,
+
     // Browser
     pub bridge_enabled: bool,
     pub bridge_port: u16,
@@ -196,6 +205,10 @@ impl Default for Settings {
             seed_time_limit: 0,
             bind_adapter: String::new(),
             preallocate: false,
+            debrid_enabled: true,
+            debrid_key: String::new(),
+            debrid_hosters: true,
+            debrid_torrents: "ask".into(),
             bridge_enabled: true,
             bridge_port: crate::bridge::DEFAULT_PORT,
             theme: "dark".into(),

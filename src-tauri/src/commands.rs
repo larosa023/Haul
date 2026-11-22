@@ -5,7 +5,7 @@ use tauri::{AppHandle, Manager};
 
 use crate::engine::{self, HttpAdd, ItemOptions, TorrentAdd, TorrentConfirm};
 use crate::settings::Settings;
-use crate::{assoc, bridge, guard, http, model, netif, paths, settings, torrent, updater};
+use crate::{assoc, bridge, debrid, guard, http, model, netif, paths, secret, settings, torrent, updater};
 
 type R<T> = Result<T, String>;
 
@@ -72,8 +72,10 @@ fn extension_dir() -> std::path::PathBuf {
 
 /// Saves settings and applies whatever changed.
 #[tauri::command]
-pub async fn set_settings(new: Settings) -> R<Settings> {
+pub async fn set_settings(mut new: Settings) -> R<Settings> {
     let old = settings::get();
+    // The API key only changes through debrid_connect / debrid_disconnect.
+    new.debrid_key = old.debrid_key.clone();
     let saved = settings::replace(new);
     if old.launch_at_startup != saved.launch_at_startup {
         assoc::set_startup(saved.launch_at_startup).map_err(|e| e.to_string())?;
@@ -116,12 +118,71 @@ pub fn reset_rules() -> Settings {
 
 #[tauri::command]
 pub async fn inspect_url(url: String, referrer: Option<String>, cookies: Option<String>) -> R<http::ProbeInfo> {
+    // Hoster links go through Real-Debrid, so show what you'll actually get.
+    if debrid::should_unrestrict(&url).await {
+        let u = debrid::unrestrict(&url, "").await?;
+        let mut info = http::inspect(http::Request { url: u.download, ..Default::default() }).await?;
+        if !u.filename.is_empty() {
+            info.name = model::sanitize(&u.filename);
+            let s = settings::get();
+            info.category = crate::sorter::categorize(&s.rules, &info.name, info.size, &url);
+            info.folder = crate::sorter::folder_for(&s, &info.category).to_string_lossy().to_string();
+        }
+        if info.size == 0 {
+            info.size = u.filesize;
+        }
+        info.debrid = true;
+        return Ok(info);
+    }
     http::inspect(http::Request { url, referrer: referrer.unwrap_or_default(), cookies: cookies.unwrap_or_default(), user_agent: String::new() }).await
 }
 
 #[tauri::command]
-pub fn add_http(add: HttpAdd) -> R<u64> {
+pub async fn add_http(mut add: HttpAdd) -> R<u64> {
+    add.debrid = debrid::should_unrestrict(add.url.trim()).await;
     engine::add_http(add)
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct DebridState {
+    connected: bool,
+    account: Option<debrid::Account>,
+    error: String,
+}
+
+/// Checks an API key with Real-Debrid and, if it works, saves it (encrypted).
+#[tauri::command]
+pub async fn debrid_connect(key: String) -> R<DebridState> {
+    let key = key.trim().to_string();
+    let account = debrid::account_for(&key).await?;
+    settings::update(|s| {
+        s.debrid_key = secret::seal(&key);
+        s.debrid_enabled = true;
+    });
+    engine::emit("settings", settings::get());
+    Ok(DebridState { connected: true, account: Some(account), error: String::new() })
+}
+
+#[tauri::command]
+pub fn debrid_disconnect() -> Settings {
+    let s = settings::update(|s| s.debrid_key.clear());
+    engine::emit("settings", s.clone());
+    s
+}
+
+#[tauri::command]
+pub async fn debrid_status() -> DebridState {
+    if settings::with(|s| s.debrid_key.is_empty()) {
+        return DebridState { connected: false, account: None, error: String::new() };
+    }
+    if debrid::key().is_empty() {
+        return DebridState { connected: false, account: None, error: "The saved key can't be read on this PC. Enter it again.".into() };
+    }
+    match debrid::account().await {
+        Ok(a) => DebridState { connected: true, account: Some(a), error: String::new() },
+        Err(e) => DebridState { connected: true, account: None, error: e },
+    }
 }
 
 async fn fetch_torrent_file(url: &str) -> R<Vec<u8>> {
@@ -273,6 +334,15 @@ pub fn open_folder(path: String) {
     open_path(&p);
 }
 
+/// Opens a web page in the default browser (https only).
+#[tauri::command]
+pub fn open_link(url: String) -> R<()> {
+    if !url.starts_with("https://") {
+        return Err("Only https links can be opened".into());
+    }
+    tauri_plugin_opener::open_url(url, None::<&str>).map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 pub fn adapters() -> Vec<netif::Adapter> {
     netif::adapters()
@@ -410,7 +480,13 @@ pub fn save_window(app: AppHandle) {
 /// A download handed to Haul from the browser extension, the clipboard or the command line.
 pub async fn incoming(req: bridge::AddRequest) -> Result<(), String> {
     let url = req.url.trim().to_string();
-    if url.starts_with("magnet:") || is_torrent_url(&url) {
+    if url.starts_with("magnet:") || is_torrent_url(&url) || url.to_ascii_lowercase().ends_with(".torrent") {
+        // "Ask each time": the Add window lets you pick Real-Debrid or the torrent client.
+        if asks_debrid() {
+            engine::emit("add-request", &req);
+            crate::show_main_window();
+            return Ok(());
+        }
         add_torrent(TorrentAdd { source: url, ..Default::default() }).await?;
         crate::show_main_window();
         return Ok(());
@@ -420,18 +496,24 @@ pub async fn incoming(req: bridge::AddRequest) -> Result<(), String> {
         crate::show_main_window();
         Ok(())
     } else {
-        let id = engine::add_http(HttpAdd {
+        let id = add_http(HttpAdd {
             url,
             name: req.filename.clone(),
             referrer: req.referrer.clone(),
             cookies: req.cookies.clone(),
             user_agent: req.user_agent.clone(),
             ..Default::default()
-        })?;
+        })
+        .await?;
         engine::toast(format!("Downloading {}", if req.filename.is_empty() { "file" } else { &req.filename }), "info");
         engine::emit("select", id);
         Ok(())
     }
+}
+
+/// Should new torrents open the Add window to choose Real-Debrid or the torrent client?
+fn asks_debrid() -> bool {
+    debrid::active() && settings::with(|s| s.debrid_torrents == "ask" && s.show_add_dialog)
 }
 
 /// Handles command-line arguments (first launch, or forwarded from a second launch).
@@ -456,7 +538,9 @@ pub fn handle_args(args: Vec<String>) {
                 let other = other.to_string();
                 show = true;
                 tauri::async_runtime::spawn(async move {
-                    let res = if other.starts_with("magnet:") || other.to_ascii_lowercase().ends_with(".torrent") {
+                    let res = if (other.starts_with("magnet:") || other.to_ascii_lowercase().ends_with(".torrent")) && asks_debrid() {
+                        incoming(bridge::AddRequest { url: other, ..Default::default() }).await
+                    } else if other.starts_with("magnet:") || other.to_ascii_lowercase().ends_with(".torrent") {
                         add_torrent(TorrentAdd { source: other, ..Default::default() }).await.map(|_| ())
                     } else if other.starts_with("http://") || other.starts_with("https://") {
                         incoming(bridge::AddRequest { url: other, ..Default::default() }).await

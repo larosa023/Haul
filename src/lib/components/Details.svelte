@@ -77,7 +77,7 @@
     return i.size ? (i.uploaded / i.size).toFixed(2) : '0.00';
   }
 
-  const tabs = $derived(it?.kind === 'torrent' ? ['general', 'files', 'options'] : ['general', 'options']);
+  const tabs = $derived(it?.kind === 'torrent' ? ['general', 'files', 'options'] : it?.kind === 'debrid' ? ['general'] : ['general', 'options']);
   $effect(() => {
     if (!tabs.includes(ui.detailsTab)) ui.detailsTab = 'general';
   });
@@ -115,8 +115,11 @@
             <span class="k">Shared</span><span class="v">{bytes(it.uploaded)} · ratio {ratio(it)}{it.seedingSecs ? ` · seeded ${duration(it.seedingSecs)}` : ''}</span>
             <span class="k">Peers</span><span class="v">{it.peers}</span>
             <span class="k">Info hash</span><span class="v mono copyable"><span>{it.infoHash}</span><button class="icon-btn small" title="Copy magnet link" onclick={() => copy(`magnet:?xt=urn:btih:${it.infoHash}&dn=${encodeURIComponent(it.name)}`)}><Icon name="copy" size={13} /></button></span>
+          {:else if it.kind === 'debrid'}
+            <span class="k">Real-Debrid</span><span class="v">{it.note || 'Waiting for Real-Debrid'}. When it’s done, the files download here at full speed.</span>
           {:else}
             <span class="k">Link</span><span class="v copyable"><span class="url" title={it.source}>{it.source}</span><button class="icon-btn small" title="Copy link" onclick={() => copy(it.source)}><Icon name="copy" size={13} /></button></span>
+            {#if it.debrid}<span class="k">Through</span><span class="v">Real-Debrid (the link is renewed automatically if it expires)</span>{/if}
             <span class="k">Connections</span><span class="v">{it.resumable ? `${it.segments || '—'} parts · resumable` : it.size ? 'Single connection (server can’t resume)' : '—'}</span>
             {#if it.sha256}<span class="k">SHA-256</span><span class="v mono">{it.sha256} {it.hashState === 'ok' ? '✓ verified' : it.hashState === 'mismatch' ? '✗ mismatch' : it.hashState === 'checking' ? '(checking…)' : '(checked when done)'}</span>{/if}
           {/if}

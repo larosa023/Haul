@@ -138,7 +138,7 @@
             onkeydown={() => {}}
           >
             <span class="c-name">
-              <span class="kind"><Icon name={it.kind === 'torrent' ? 'magnet' : 'file'} size={16} /></span>
+              <span class="kind" title={it.debrid ? 'Through Real-Debrid' : undefined}><Icon name={it.kind === 'debrid' || it.debrid ? 'cloud' : it.kind === 'torrent' ? 'magnet' : 'file'} size={16} /></span>
               <span class="names">
                 <span class="title" title={it.name}>{it.name}</span>
                 {#if !compact}<span class="subline" class:errtext={it.status === 'error'} title={sub(it)}>{sub(it)}</span>{/if}

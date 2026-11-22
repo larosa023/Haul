@@ -1,6 +1,7 @@
 <script lang="ts">
   import Modal from './Modal.svelte';
   import Icon from './Icon.svelte';
+  import Switch from './Switch.svelte';
   import { api, isTauri, type AddRequest, type ProbeInfo } from '../api';
   import { app, ui, toast, errorText, selectOnly } from '../state.svelte';
   import { bytes, linkKind } from '../format.js';
@@ -28,6 +29,15 @@
   const single = $derived(links.length === 1 ? links[0] : '');
   const kind = $derived(single ? linkKind(single) : null);
   const categories = $derived(Object.keys(app.settings?.folders ?? {}));
+  // Real-Debrid for torrents: shown when connected and not switched off.
+  const debridOffered = $derived(!!app.settings?.debridEnabled && !!app.settings?.debridKey && app.settings?.debridTorrents !== 'off');
+  const anyTorrent = $derived(links.some((l) => linkKind(l) === 'torrent'));
+  // svelte-ignore state_referenced_locally
+  let viaDebrid = $state(app.settings?.debridTorrents === 'always' || (app.settings?.debridTorrents === 'ask' && localStorage.getItem('haul:via-debrid') !== '0'));
+  $effect(() => {
+    if (app.settings?.debridTorrents === 'ask') localStorage.setItem('haul:via-debrid', viaDebrid ? '1' : '0');
+  });
+  const useDebrid = $derived(debridOffered && viaDebrid);
 
   let timer: ReturnType<typeof setTimeout> | undefined;
   let seq = 0;
@@ -92,7 +102,7 @@
     try {
       if (links.length === 1) {
         if (kind === 'torrent') {
-          await api.addTorrent({ source: single });
+          await api.addTorrent({ source: single, debrid: useDebrid });
         } else if (kind === 'http') {
           const id = await api.addHttp({
             url: single,
@@ -117,7 +127,7 @@
         for (const l of links) {
           const k = linkKind(l);
           try {
-            if (k === 'torrent') await api.addTorrent({ source: l, direct: true });
+            if (k === 'torrent') await api.addTorrent({ source: l, direct: true, debrid: useDebrid });
             else if (k === 'http') await api.addHttp({ url: l, paused });
             else continue;
             n++;
@@ -154,7 +164,7 @@
     {#if links.length > 1}
       <p class="muted note">{links.length} links. Each goes to its category folder.</p>
     {:else if kind === 'torrent'}
-      <p class="muted note"><Icon name="magnet" size={14} /> Torrent. You’ll pick files once Haul has its file list.</p>
+      <p class="muted note"><Icon name={useDebrid ? 'cloud' : 'magnet'} size={14} /> {useDebrid ? 'Real-Debrid downloads this torrent first, then Haul fetches the files at full speed.' : 'Torrent. You’ll pick files once Haul has its file list.'}</p>
     {:else if kind === 'http'}
       <div class="probe">
         {#if probing}<span class="spinner"></span><span class="muted">Checking the link…</span>
@@ -162,6 +172,7 @@
         {:else if probe}
           <Icon name="file" size={15} />
           <span>{probe.size ? bytes(probe.size) : 'Size unknown'}</span>
+          {#if probe.debrid}<span class="chip rd" title="This hoster link goes through Real-Debrid"><Icon name="cloud" size={12} />&nbsp;Real-Debrid</span>{/if}
           <span class="chip" title={probe.resumable ? 'Can be paused and resumed, and uses several connections' : 'This server sends the file in one piece, so it can’t resume'}>{probe.resumable ? 'Resumable' : 'No resume'}</span>
         {/if}
       </div>
@@ -190,6 +201,9 @@
       </label>
     {/if}
 
+    {#if anyTorrent && debridOffered}
+      <label class="check rdswitch"><Switch bind:checked={viaDebrid} label="Download through Real-Debrid" /> Download {links.length > 1 ? 'torrents ' : ''}through Real-Debrid</label>
+    {/if}
     {#if kind !== 'torrent'}
       <label class="check"><input type="checkbox" bind:checked={paused} /> Add paused</label>
     {/if}
@@ -216,5 +230,7 @@
   .bad { color: var(--danger); }
   .check { display: flex; align-items: center; gap: 8px; font-size: 13px; cursor: pointer; }
   .grow { flex: 1; }
+  .rd { background: color-mix(in srgb, var(--accent) 20%, transparent); color: var(--accent); }
+  .rdswitch { gap: 10px; }
   .left { margin-right: auto; }
 </style>

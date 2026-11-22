@@ -2,6 +2,8 @@ mod assoc;
 mod bridge;
 mod clipboard;
 mod commands;
+mod debrid;
+mod secret;
 mod engine;
 mod extract;
 mod guard;
@@ -201,6 +203,9 @@ pub fn run() {
             commands::reset_rules,
             commands::inspect_url,
             commands::add_http,
+            commands::debrid_connect,
+            commands::debrid_disconnect,
+            commands::debrid_status,
             commands::add_torrent,
             commands::confirm_torrent,
             commands::cancel_torrent,
@@ -219,6 +224,7 @@ pub fn run() {
             commands::reveal,
             commands::open_folder,
             commands::adapters,
+            commands::open_link,
             commands::handler_state,
             commands::make_default,
             commands::check_update,

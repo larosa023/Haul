@@ -114,6 +114,8 @@ pub struct ProbeInfo {
     pub last_modified: String,
     pub category: String,
     pub folder: String,
+    /// The file comes through Real-Debrid.
+    pub debrid: bool,
 }
 
 struct Probe {
@@ -258,7 +260,7 @@ async fn probe(req: &Request, from: u64, end: Option<u64>) -> Result<Probe, Fail
     let folder = sorter::folder_for(&s, &category).to_string_lossy().to_string();
     let response = (ranged || from == 0).then_some(resp);
     Ok(Probe {
-        info: ProbeInfo { name, size, resumable, final_url, etag, last_modified, category, folder },
+        info: ProbeInfo { name, size, resumable, final_url, etag, last_modified, category, folder, debrid: false },
         response,
     })
 }
@@ -367,7 +369,19 @@ pub fn split_largest(segs: &mut Vec<Segment>) -> Option<usize> {
 
 /// Runs one download until it completes, fails or is stopped. Errors are returned as text.
 pub async fn run(id: u64, ctl: Arc<Control>) -> Result<(), Fail> {
-    let Some(item) = model::with(|s| s.get(id).cloned()) else { return Ok(()) };
+    let Some(mut item) = model::with(|s| s.get(id).cloned()) else { return Ok(()) };
+    // Real-Debrid links: get (or renew) the direct download link first.
+    if item.source.is_empty() && !item.debrid_link.is_empty() {
+        let u = crate::debrid::unrestrict(&item.debrid_link, "").await.map_err(|e| {
+            if e.starts_with("Couldn't reach") || e.contains("busy") { Fail::Temporary(e) } else { Fail::Permanent(e) }
+        })?;
+        model::with(|st| {
+            if let Some(it) = st.get_mut(id) {
+                it.source = u.download.clone();
+            }
+        });
+        item.source = u.download;
+    }
     let s = settings::get();
     let req = Request {
         url: item.source.clone(),

@@ -1,6 +1,6 @@
 [package]
 name = "haul"
-version = "0.1.0"
+version = "0.2.0"
 description = "A clean download manager and torrent client for Windows"
 edition = "2021"
 rust-version = "1.80"
@@ -34,13 +34,14 @@ chrono = { version = "0.4", default-features = false, features = ["clock", "std"
 zip = { version = "2", default-features = false, features = ["deflate", "deflate64", "bzip2", "lzma"] }
 sevenz-rust2 = { version = "0.20", default-features = false, features = ["util", "bzip2"] }
 netdev = "0.47"
+base64 = "0.22"
 
 [target.'cfg(windows)'.dependencies]
 tauri-plugin-single-instance = "2"
 tauri-winrt-notification = "0.8"
 winreg = "0.55"
 clipboard-win = "5"
-windows-sys = { version = "0.59", features = ["Win32_System_DataExchange", "Win32_UI_WindowsAndMessaging", "Win32_Foundation", "Win32_System_Threading", "Win32_UI_Shell", "Win32_System_IO"] }
+windows-sys = { version = "0.59", features = ["Win32_System_DataExchange", "Win32_UI_WindowsAndMessaging", "Win32_Foundation", "Win32_System_Threading", "Win32_UI_Shell", "Win32_System_IO", "Win32_Security_Cryptography"] }
 
 [target.'cfg(not(windows))'.dependencies]
 tauri-plugin-single-instance = "2"

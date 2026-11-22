@@ -3,7 +3,7 @@
   import Icon from '../lib/components/Icon.svelte';
   import SettingRow from '../lib/components/SettingRow.svelte';
   import Switch from '../lib/components/Switch.svelte';
-  import { api, isTauri, type Adapter, type Rule, type Settings } from '../lib/api';
+  import { api, isTauri, type Adapter, type DebridState, type Rule, type Settings } from '../lib/api';
   import { app, ui, saveSettings, toast, errorText } from '../lib/state.svelte';
   import { THEMES, ACCENT_SWATCHES, cssVars, effectiveTheme, resolveAccent, themeToJson, type ThemeDef } from '../lib/themecore.js';
   import { themes, allThemes, reloadThemes, findTheme } from '../lib/theme.svelte';
@@ -15,6 +15,7 @@
     { id: 'speed', label: 'Speed & schedule', icon: 'gauge', blurb: 'Limits, and slower speeds at set times' },
     { id: 'torrents', label: 'Torrents', icon: 'magnet', blurb: 'Seeding, peers, privacy and ports' },
     { id: 'network', label: 'Network adapter', icon: 'network', blurb: 'Keep torrents on your VPN' },
+    { id: 'debrid', label: 'Debrid', icon: 'cloud', blurb: 'Real-Debrid for file hosters and torrents' },
     { id: 'browser', label: 'Browser', icon: 'puzzle', blurb: 'Send downloads from Chrome, Edge or Drift' },
     { id: 'appearance', label: 'Appearance', icon: 'brush', blurb: 'Themes, accent color and layout' },
     { id: 'about', label: 'About & updates', icon: 'refresh', blurb: 'Version, updates and shortcuts' },
@@ -27,6 +28,33 @@
   let adapters: Adapter[] = $state([]);
   let handlers = $state({ magnet: false, torrent: false });
   let checking = $state(false);
+  let rdKey = $state('');
+  let rdBusy = $state(false);
+  let rd: DebridState | null = $state(null);
+
+  $effect(() => {
+    if (ui.settingsTab === 'debrid' && isTauri && !rd) void api.debridStatus().then((s) => (rd = s));
+  });
+
+  async function rdConnect() {
+    rdBusy = true;
+    try {
+      rd = await api.debridConnect(rdKey);
+      rdKey = '';
+      toast(`Connected to Real-Debrid as ${rd.account?.username ?? ''}`, 'success');
+    } catch (e) {
+      toast(errorText(e), 'error', 8000);
+    } finally {
+      rdBusy = false;
+    }
+  }
+
+  async function rdDisconnect() {
+    app.settings = await api.debridDisconnect();
+    rd = { connected: false, account: null, error: '' };
+  }
+
+  const daysLeft = (secs: number) => Math.max(0, Math.floor(secs / 86400));
 
   onMount(() => {
     if (!isTauri) return;
@@ -366,6 +394,58 @@
         </div>
         <p class="muted small">Adapters: <button class="link" onclick={() => api.adapters().then((a) => (adapters = a))}>refresh list</button></p>
 
+      {:else if section.id === 'debrid'}
+        {#if s.debridKey && rd?.connected !== false}
+          <div class="status-card">
+            <span class="dot" class:good={!!rd?.account && rd.account.kind === 'premium'}></span>
+            <div>
+              {#if rd?.account}
+                <strong>Real-Debrid · {rd.account.username}</strong>
+                <div class="muted small">
+                  {rd.account.kind === 'premium' ? `Premium · ${daysLeft(rd.account.premium)} days left${rd.account.expiration ? ` (until ${new Date(rd.account.expiration).toLocaleDateString()})` : ''}` : 'Free account: most features need premium'}
+                </div>
+              {:else if rd?.error}
+                <strong>Real-Debrid</strong><div class="bad small">{rd.error}</div>
+              {:else}
+                <strong>Real-Debrid</strong><div class="muted small">Checking your account…</div>
+              {/if}
+            </div>
+            <span class="grow"></span>
+            <button class="btn sm ghost" onclick={rdDisconnect}>Disconnect</button>
+          </div>
+          <div class="group" style="margin-top: 10px">
+            <SettingRow title="Use Real-Debrid" description="Switch it off to download everything directly again, without removing your key.">
+              <Switch checked={s.debridEnabled} label="Use Real-Debrid" onchange={(v) => set('debridEnabled', v)} />
+            </SettingRow>
+            <SettingRow title="File hoster links" description="Links from hosters Real-Debrid supports (1fichier, Rapidgator, Mega and many more) download at premium speed, with Haul’s multiple connections. Expired links are renewed automatically.">
+              <Switch checked={s.debridHosters} label="File hoster links" onchange={(v) => set('debridHosters', v)} />
+            </SettingRow>
+            <SettingRow title="Torrents" description="Real-Debrid downloads the torrent on its servers (cached ones are instant), then Haul fetches the files over HTTPS. No seeding, and no torrent traffic from your PC.">
+              <div class="seg">
+                {#each [['off', 'Off'], ['ask', 'Ask each time'], ['always', 'Always']] as [v, l] (v)}
+                  <button class:on={s.debridTorrents === v} onclick={() => set('debridTorrents', v as Settings['debridTorrents'])}>{l}</button>
+                {/each}
+              </div>
+            </SettingRow>
+          </div>
+          <p class="faint small">“Ask each time” adds a Real-Debrid switch to the New download window, and magnet links you click open it.</p>
+        {:else}
+          <div class="group connect">
+            <p>Connect your <strong>Real-Debrid</strong> account to download from file hosters at premium speed, and to have torrents downloaded on Real-Debrid’s servers.</p>
+            <ol>
+              <li>Sign in at real-debrid.com and open <button class="link" onclick={() => api.openLink('https://real-debrid.com/apitoken')}>real-debrid.com/apitoken</button>.</li>
+              <li>Copy your API private token and paste it here.</li>
+            </ol>
+            <div class="pathrow">
+              <input class="input mono" type="password" bind:value={rdKey} placeholder="API private token" spellcheck="false" autocomplete="off"
+                onkeydown={(e) => e.key === 'Enter' && rdKey.trim() && rdConnect()} />
+              <button class="btn primary" disabled={!rdKey.trim() || rdBusy} onclick={rdConnect}>{#if rdBusy}<span class="spinner"></span>{/if}Connect</button>
+            </div>
+            {#if rd?.error}<p class="bad small">{rd.error}</p>{/if}
+            <p class="faint small">The key is stored encrypted for your Windows account, and is only ever sent to Real-Debrid.</p>
+          </div>
+        {/if}
+
       {:else if section.id === 'browser'}
         <div class="group">
           <SettingRow title="Accept downloads from the browser" description="The Haul extension sends downloads here. Only this PC can reach it.">
@@ -527,6 +607,10 @@
   .status-card { display: flex; align-items: center; gap: 12px; padding: 12px 14px; border-radius: 8px; background: var(--surface); border: 1px solid var(--line); }
   .status-card .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--warn); flex-shrink: 0; }
   .status-card .dot.good { background: var(--ok); box-shadow: 0 0 8px var(--ok); }
+  .connect { padding: 14px 16px; font-size: 13px; }
+  .connect p { margin: 0 0 8px; }
+  .connect ol { margin: 0 0 12px; padding-left: 20px; line-height: 1.7; }
+  .connect .pathrow .input { flex: 1; }
   .steps ol { margin: 0; padding: 12px 16px 12px 34px; display: flex; flex-direction: column; gap: 10px; font-size: 13px; line-height: 1.6; }
   .themes { display: grid; grid-template-columns: repeat(auto-fill, minmax(132px, 1fr)); gap: 10px; }
   .theme { display: flex; flex-direction: column; gap: 6px; padding: 6px; border-radius: 8px; border: 2px solid transparent; background: none; cursor: pointer; text-align: left; color: var(--text); }

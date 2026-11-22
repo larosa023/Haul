@@ -1,7 +1,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 
-export type Kind = 'http' | 'torrent';
+export type Kind = 'http' | 'torrent' | 'debrid';
 export type Status = 'queued' | 'metadata' | 'checking' | 'downloading' | 'seeding' | 'paused' | 'completed' | 'error';
 
 export interface Item {
@@ -39,6 +39,8 @@ export interface Item {
   peers: number;
   note: string;
   fileCount: number;
+  /** Comes through Real-Debrid. */
+  debrid: boolean;
 }
 
 export interface Rule {
@@ -86,6 +88,10 @@ export interface Settings {
   seedTimeLimit: number;
   bindAdapter: string;
   preallocate: boolean;
+  debridEnabled: boolean;
+  debridKey: string;
+  debridHosters: boolean;
+  debridTorrents: 'off' | 'ask' | 'always';
   bridgeEnabled: boolean;
   bridgePort: number;
   theme: string;
@@ -153,6 +159,7 @@ export interface ProbeInfo {
   lastModified: string;
   category: string;
   folder: string;
+  debrid: boolean;
 }
 
 export interface TorrentMeta {
@@ -163,6 +170,22 @@ export interface TorrentMeta {
   folder: string;
   category: string;
   size: number;
+  debrid: boolean;
+}
+
+export interface DebridAccount {
+  username: string;
+  email: string;
+  kind: string;
+  premium: number;
+  expiration: string;
+  points: number;
+}
+
+export interface DebridState {
+  connected: boolean;
+  account: DebridAccount | null;
+  error: string;
 }
 
 export interface TorrentFile {
@@ -206,7 +229,7 @@ export const api = {
   resetRules: () => call<Settings>('reset_rules'),
   inspect: (url: string, referrer?: string, cookies?: string) => call<ProbeInfo>('inspect_url', { url, referrer, cookies }),
   addHttp: (add: Record<string, unknown>) => call<number>('add_http', { add }),
-  addTorrent: (add: { source?: string; bytes?: number[]; direct?: boolean }) => call<{ id: number; existing: boolean }>('add_torrent', { add }),
+  addTorrent: (add: { source?: string; bytes?: number[]; direct?: boolean; debrid?: boolean }) => call<{ id: number; existing: boolean }>('add_torrent', { add }),
   confirmTorrent: (confirm: { id: number; folder: string; priorities: number[]; paused: boolean; sequential: boolean; category: string }) =>
     call<void>('confirm_torrent', { confirm }),
   cancelTorrent: (id: number) => call<void>('cancel_torrent', { id }),
@@ -224,6 +247,10 @@ export const api = {
   open: (id: number) => call<void>('open_item', { id }),
   reveal: (id: number) => call<void>('reveal', { id }),
   openFolder: (path: string) => call<void>('open_folder', { path }),
+  debridConnect: (key: string) => call<DebridState>('debrid_connect', { key }),
+  debridDisconnect: () => call<Settings>('debrid_disconnect'),
+  debridStatus: () => call<DebridState>('debrid_status'),
+  openLink: (url: string) => call<void>('open_link', { url }),
   adapters: () => call<Adapter[]>('adapters'),
   handlerState: () => call<{ magnet: boolean; torrent: boolean }>('handler_state'),
   makeDefault: () => call<void>('make_default'),

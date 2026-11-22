@@ -169,7 +169,7 @@ export async function refreshOrder(order?: number[]) {
 export async function nextPending() {
   if (ui.dialog) return;
   const list = await api.pendingTorrents().catch(() => []);
-  if (list.length && !ui.dialog) {
+  if (list?.length && !ui.dialog) {
     ui.view = 'list';
     ui.dialog = { kind: 'torrent', meta: list[0] };
   }

@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.0
+
+- Real-Debrid support. Connect your account in Settings → Debrid with your API key (stored encrypted for your Windows account).
+  - Links from file hosters Real-Debrid supports download at premium speed, with Haul's multiple connections. Expired links are renewed automatically.
+  - Torrents can be downloaded by Real-Debrid instead of your PC: pick the files, watch Real-Debrid's progress in the list, then Haul fetches the files at full speed, keeping the torrent's folders. Choose Off, Ask each time (a switch in the New download window) or Always.
+- Magnet links and .torrent files you open from your browser or Explorer show the New download window when Real-Debrid is set to Ask each time.
+
 ## 0.1.0
 
 First release of Haul: direct downloads and torrents in one light app.

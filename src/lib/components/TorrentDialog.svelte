@@ -84,10 +84,14 @@
         {#if subfolder}<small class="faint">Files go in {folder}{subfolder}</small>{/if}
       </label>
     </div>
-    <div class="flags">
-      <label class="flag"><Switch bind:checked={sequential} label="Download in order" /> Download in order</label>
-      <label class="flag"><Switch bind:checked={paused} label="Add paused" /> Add paused</label>
-    </div>
+    {#if meta.debrid}
+      <p class="muted rdnote">Real-Debrid downloads the files you pick, then Haul fetches them at full speed into this folder.</p>
+    {:else}
+      <div class="flags">
+        <label class="flag"><Switch bind:checked={sequential} label="Download in order" /> Download in order</label>
+        <label class="flag"><Switch bind:checked={paused} label="Add paused" /> Add paused</label>
+      </div>
+    {/if}
   </div>
 
   <div class="fbar">
@@ -103,12 +107,12 @@
         <input type="checkbox" checked={prio[f.i] > 0} onchange={(e) => (prio[f.i] = (e.currentTarget as HTMLInputElement).checked ? 2 : 0)} aria-label={f.path} />
         <span class="name" title={f.path}>{f.path}</span>
         <span class="size">{bytes(f.size)}</span>
-        <select class="select sel" value={String(prio[f.i])} onchange={(e) => (prio[f.i] = Number((e.currentTarget as HTMLSelectElement).value))} aria-label="Priority">
+        {#if !meta.debrid}<select class="select sel" value={String(prio[f.i])} onchange={(e) => (prio[f.i] = Number((e.currentTarget as HTMLSelectElement).value))} aria-label="Priority">
           <option value="0">Skip</option>
           <option value="1">Low</option>
           <option value="2">Normal</option>
           <option value="3">High</option>
-        </select>
+        </select>{/if}
       </div>
     {/each}
     {#if shown.length > 2000}<div class="muted more">…and {shown.length - 2000} more (use the filter)</div>{/if}
@@ -118,7 +122,7 @@
     <span class="muted hash mono" title="Info hash">{meta.hash}</span>
     <span class="grow"></span>
     <button class="btn" onclick={cancel}>Cancel</button>
-    <button class="btn primary" disabled={busy || !selectedCount} onclick={add}>{#if busy}<span class="spinner"></span>{/if}Add torrent</button>
+    <button class="btn primary" disabled={busy || !selectedCount} onclick={add}>{#if busy}<span class="spinner"></span>{/if}{meta.debrid ? 'Send to Real-Debrid' : 'Add torrent'}</button>
   {/snippet}
 </Modal>
 
@@ -134,6 +138,7 @@
   .find { width: 180px; height: 28px; }
   .grow { flex: 1; }
   .files { max-height: 42vh; overflow: auto; }
+  .rdnote { margin: 0; font-size: 12.5px; }
   .file { display: grid; grid-template-columns: 18px 1fr 80px 92px; gap: 10px; align-items: center; padding: 4px 0; font-size: 12.5px; border-bottom: 1px solid var(--line); }
   .file.skip .name, .file.skip .size { color: var(--text-3); }
   .name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
