@@ -18,6 +18,7 @@
   import Toasts from './lib/components/Toasts.svelte';
   import ContextMenu from './lib/components/ContextMenu.svelte';
   import Settings from './routes/Settings.svelte';
+  import Search from './routes/Search.svelte';
 
   onMount(() => {
     listenAll();
@@ -44,6 +45,7 @@
   // Live theming: any change to theme, accent or the system colors applies at once.
   $effect(() => {
     if (app.settings) setSpeedBits(app.settings.speedBits);
+    document.documentElement.dataset.progress = app.settings?.progressStyle || 'glow';
   });
 
   $effect(() => {
@@ -102,7 +104,7 @@
     }
     if (e.key === 'Escape') {
       if (ui.dialog) return; // dialogs close themselves
-      if (ui.view === 'settings') ui.view = 'list';
+      if (ui.view === 'settings' || ui.view === 'search') ui.view = 'list';
       else if (ui.search) ui.search = '';
       else selection.clear();
       return;
@@ -112,6 +114,11 @@
       e.preventDefault();
       ui.view = 'list';
       ui.dialog = { kind: 'add' };
+      return;
+    }
+    if (ctrl && e.key.toLowerCase() === 'k') {
+      e.preventDefault();
+      ui.view = 'search';
       return;
     }
     if (ctrl && e.key.toLowerCase() === 'o') {
@@ -179,6 +186,8 @@
       <TopBar />
       {#if ui.view === 'settings'}
         <Settings />
+      {:else if ui.view === 'search'}
+        <Search />
       {:else}
         <Banners />
         <DownloadList />

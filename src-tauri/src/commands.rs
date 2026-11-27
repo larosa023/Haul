@@ -90,6 +90,8 @@ pub async fn set_settings(mut new: Settings) -> R<Settings> {
     let old = settings::get();
     // The API key only changes through debrid_connect / debrid_disconnect.
     new.debrid_key = old.debrid_key.clone();
+    new.debrid_keys = old.debrid_keys.clone();
+    new.search_indexers = old.search_indexers.clone();
     new.hf_token = old.hf_token.clone();
     new.vt_key = old.vt_key.clone();
     new.schema = old.schema;
@@ -140,7 +142,7 @@ pub fn reset_rules() -> Settings {
 
 #[tauri::command]
 pub async fn inspect_url(url: String, referrer: Option<String>, cookies: Option<String>) -> R<http::ProbeInfo> {
-    // Hoster links go through Real-Debrid, so show what you'll actually get.
+    // Hoster links go through the debrid service, so show what you'll actually get.
     if debrid::should_unrestrict(&url).await {
         let u = debrid::unrestrict(&url, "").await?;
         let mut info = http::inspect(http::Request { url: u.download, ..Default::default() }).await?;
@@ -199,42 +201,65 @@ pub async fn add_http(mut add: HttpAdd) -> R<u64> {
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct DebridState {
+    service: String,
+    /// Services that have a key saved.
+    saved: Vec<String>,
     connected: bool,
     account: Option<debrid::Account>,
     error: String,
 }
 
-/// Checks an API key with Real-Debrid and, if it works, saves it (encrypted).
+fn debrid_state(connected: bool, account: Option<debrid::Account>, error: String) -> DebridState {
+    let s = settings::get();
+    DebridState { service: s.debrid_service.clone(), saved: s.debrid_keys.keys().cloned().collect(), connected, account, error }
+}
+
+/// Checks an API key with the chosen service and, if it works, saves it (encrypted) and makes
+/// that service the one Haul uses.
 #[tauri::command]
-pub async fn debrid_connect(key: String) -> R<DebridState> {
+pub async fn debrid_connect(key: String, service: Option<String>) -> R<DebridState> {
     let key = key.trim().to_string();
-    let account = debrid::account_for(&key).await?;
+    let svc = debrid::Service::from_id(&service.unwrap_or_else(|| settings::with(|s| s.debrid_service.clone())));
+    let account = debrid::account_for(svc, &key).await?;
     settings::update(|s| {
-        s.debrid_key = secret::seal(&key);
+        s.debrid_keys.insert(svc.id().into(), secret::seal(&key));
+        s.debrid_service = svc.id().into();
         s.debrid_enabled = true;
     });
     engine::emit("settings", settings::get());
-    Ok(DebridState { connected: true, account: Some(account), error: String::new() })
+    Ok(debrid_state(true, Some(account), String::new()))
+}
+
+/// Switches to another service whose key is already saved.
+#[tauri::command]
+pub async fn debrid_use(service: String) -> DebridState {
+    let svc = debrid::Service::from_id(&service);
+    settings::update(|s| s.debrid_service = svc.id().into());
+    engine::emit("settings", settings::get());
+    debrid_status().await
 }
 
 #[tauri::command]
-pub fn debrid_disconnect() -> Settings {
-    let s = settings::update(|s| s.debrid_key.clear());
+pub fn debrid_disconnect(service: Option<String>) -> Settings {
+    let s = settings::update(|s| {
+        let id = service.clone().unwrap_or_else(|| s.debrid_service.clone());
+        s.debrid_keys.remove(&id);
+    });
     engine::emit("settings", s.clone());
     s
 }
 
 #[tauri::command]
 pub async fn debrid_status() -> DebridState {
-    if settings::with(|s| s.debrid_key.is_empty()) {
-        return DebridState { connected: false, account: None, error: String::new() };
+    if !settings::with(|s| s.debrid_keys.contains_key(&s.debrid_service)) {
+        return debrid_state(false, None, String::new());
     }
     if debrid::key().is_empty() {
-        return DebridState { connected: false, account: None, error: "The saved key can't be read on this PC. Enter it again.".into() };
+        return debrid_state(false, None, "The saved key can't be read on this PC. Enter it again.".into());
     }
     match debrid::account().await {
-        Ok(a) => DebridState { connected: true, account: Some(a), error: String::new() },
-        Err(e) => DebridState { connected: true, account: None, error: e },
+        Ok(a) => debrid_state(true, Some(a), String::new()),
+        Err(e) => debrid_state(true, None, e),
     }
 }
 
@@ -671,7 +696,8 @@ pub async fn incoming(req: bridge::AddRequest) -> Result<(), String> {
         crate::show_main_window();
         return Ok(());
     }
-    if settings::with(|s| s.show_add_dialog) {
+    // Already downloaded (or in the list)? Show the Add window so the warning is seen.
+    if settings::with(|s| s.show_add_dialog) || engine::duplicate_of(&url, &req.filename).is_some() {
         engine::emit("add-request", &req);
         crate::show_main_window();
         Ok(())
@@ -750,4 +776,61 @@ pub fn show_window(app: AppHandle) {
         let _ = w.show();
         let _ = w.set_focus();
     }
+}
+
+// ---------------------------------------------------------------- torrent search
+
+#[tauri::command]
+pub async fn search_torrents(query: String, category: Option<String>) -> crate::search::Results {
+    crate::search::search(&query, category.as_deref().unwrap_or("")).await
+}
+
+/// Adds a search result: a magnet, or a .torrent fetched from the indexer.
+#[tauri::command]
+pub async fn search_add(link: String, debrid: Option<bool>) -> R<engine::AddResult> {
+    let add = match crate::search::fetch(&link).await? {
+        Ok(magnet) => TorrentAdd { source: magnet, debrid, ..Default::default() },
+        Err(bytes) => TorrentAdd { source: link, bytes: Some(bytes), debrid, ..Default::default() },
+    };
+    add_torrent(add).await
+}
+
+/// Checks a Torznab indexer and saves it (its key encrypted).
+#[tauri::command]
+pub async fn search_add_indexer(indexer: crate::search::IndexerInput) -> R<Settings> {
+    let mut ix = settings::Indexer { name: indexer.name.trim().to_string(), url: indexer.url.trim().to_string(), key: String::new(), enabled: true };
+    if !indexer.key.trim().is_empty() {
+        ix.key = secret::seal(indexer.key.trim());
+    }
+    if !ix.url.starts_with("http") {
+        return Err("The URL should start with http:// or https://".into());
+    }
+    let title = crate::search::test(&ix).await?;
+    if ix.name.is_empty() {
+        ix.name = title;
+    }
+    let s = settings::update(|s| {
+        s.search_indexers.retain(|i| i.url != ix.url);
+        s.search_indexers.push(ix.clone());
+    });
+    engine::emit("settings", s.clone());
+    Ok(s)
+}
+
+#[tauri::command]
+pub fn search_remove_indexer(url: String) -> Settings {
+    let s = settings::update(|s| s.search_indexers.retain(|i| i.url != url));
+    engine::emit("settings", s.clone());
+    s
+}
+
+#[tauri::command]
+pub fn search_toggle_indexer(url: String, enabled: bool) -> Settings {
+    let s = settings::update(|s| {
+        for i in s.search_indexers.iter_mut().filter(|i| i.url == url) {
+            i.enabled = enabled;
+        }
+    });
+    engine::emit("settings", s.clone());
+    s
 }

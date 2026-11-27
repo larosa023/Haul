@@ -126,6 +126,11 @@ export interface Settings {
   nativeTitleBar: boolean;
   compactRows: boolean;
   speedBits: boolean;
+  progressStyle: string;
+  debridService: DebridService;
+  debridKeys: Record<string, string>;
+  searchArchive: boolean;
+  searchIndexers: { name: string; url: string; key: string; enabled: boolean }[];
   autoUpdate: boolean;
   channel: 'stable' | 'beta';
   skipVersion: string;
@@ -194,6 +199,24 @@ export interface ProbeInfo {
   stream: boolean;
   contentType: string;
   safety: SafetyReport | null;
+}
+
+export interface SearchHit {
+  title: string;
+  size: number;
+  seeders: number;
+  leechers: number;
+  source: string;
+  link: string;
+  infoUrl: string;
+  published: number;
+  category: string;
+  downloads: number;
+}
+
+export interface SearchResults {
+  hits: SearchHit[];
+  errors: [string, string][];
 }
 
 export interface MediaOptions {
@@ -284,7 +307,12 @@ export interface DebridAccount {
   points: number;
 }
 
+export type DebridService = 'realdebrid' | 'alldebrid' | 'premiumize' | 'torbox';
+
 export interface DebridState {
+  service: DebridService;
+  /** Services with a key saved. */
+  saved: DebridService[];
   connected: boolean;
   account: DebridAccount | null;
   error: string;
@@ -350,8 +378,14 @@ export const api = {
   open: (id: number) => call<void>('open_item', { id }),
   reveal: (id: number) => call<void>('reveal', { id }),
   openFolder: (path: string) => call<void>('open_folder', { path }),
-  debridConnect: (key: string) => call<DebridState>('debrid_connect', { key }),
-  debridDisconnect: () => call<Settings>('debrid_disconnect'),
+  debridConnect: (key: string, service: DebridService) => call<DebridState>('debrid_connect', { key, service }),
+  debridUse: (service: DebridService) => call<DebridState>('debrid_use', { service }),
+  debridDisconnect: (service?: DebridService) => call<Settings>('debrid_disconnect', { service }),
+  searchTorrents: (query: string, category: string) => call<SearchResults>('search_torrents', { query, category }),
+  searchAdd: (link: string, debrid?: boolean) => call<{ id: number; existing: boolean }>('search_add', { link, debrid }),
+  searchAddIndexer: (indexer: { name: string; url: string; key: string }) => call<Settings>('search_add_indexer', { indexer }),
+  searchRemoveIndexer: (url: string) => call<Settings>('search_remove_indexer', { url }),
+  searchToggleIndexer: (url: string, enabled: boolean) => call<Settings>('search_toggle_indexer', { url, enabled }),
   debridStatus: () => call<DebridState>('debrid_status'),
   openLink: (url: string) => call<void>('open_link', { url }),
   adapters: () => call<Adapter[]>('adapters'),

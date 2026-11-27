@@ -46,6 +46,13 @@
     {/each}
   </nav>
 
+  <nav class="more">
+    <button class="filter" class:on={ui.view === 'search'} onclick={() => (ui.view = 'search')} title="Search torrents (Ctrl+K)">
+      <Icon name="search" size={17} />
+      <span class="label">Search</span>
+    </button>
+  </nav>
+
   <div class="spacer" data-tauri-drag-region></div>
 
   {#if t?.engine && !t.engine.running && t.engine.error}
@@ -81,6 +88,7 @@
   .brand svg { flex-shrink: 0; pointer-events: none; }
   .new { margin: 2px 0 12px; height: 36px; width: 100%; justify-content: flex-start; padding: 0 12px; }
   nav { display: flex; flex-direction: column; gap: 1px; }
+  nav.more { margin-top: 10px; padding-top: 10px; border-top: 1px solid var(--line); }
   .filter {
     position: relative; display: flex; align-items: center; gap: 11px; height: 36px; padding: 0 10px; border: 0; border-radius: 6px;
     background: none; color: var(--text-2); cursor: pointer; text-align: left; font-weight: 500;

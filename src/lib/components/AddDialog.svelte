@@ -1,10 +1,12 @@
 <script lang="ts">
+  import { debridName } from '../format.js';
   import Modal from './Modal.svelte';
   import Icon from './Icon.svelte';
   import Switch from './Switch.svelte';
   import Safety from './Safety.svelte';
+  import Duplicate from './Duplicate.svelte';
   import { api, isTauri, type AddRequest, type ProbeInfo } from '../api';
-  import { app, ui, toast, errorText, selectOnly } from '../state.svelte';
+  import { findDuplicate, app, ui, toast, errorText, selectOnly } from '../state.svelte';
   import { bytes, linkKind, batchLinks } from '../format.js';
 
   let { url = '', request }: { url?: string; request?: AddRequest } = $props();
@@ -18,7 +20,7 @@
   let category = $state('Other');
   let sha256 = $state('');
   let paused = $state(false);
-  let probe: ProbeInfo | null = $state(null);
+  let probe = $state<ProbeInfo | null>(null);
   let probing = $state(false);
   let probeError = $state('');
   let busy = $state(false);
@@ -32,10 +34,14 @@
   const single = $derived(links.length === 1 ? links[0] : '');
   const kind = $derived(single ? linkKind(single) : null);
   const isHf = $derived(/^https?:\/\/(www\.)?(huggingface\.co|hf\.co)\/[^/]+\/[^/?#]+/i.test(single));
+  // Already downloaded (or in the list)?
+  const dup = $derived(single ? findDuplicate(single, probe?.name ?? '') : null);
+  const dupCount = $derived(links.length > 1 ? links.filter((l) => findDuplicate(l)).length : 0);
+  let skipDupes = $state(true);
   const mediaCount = $derived(links.filter((l) => linkKind(l) === 'media').length);
   const categories = $derived(Object.keys(app.settings?.folders ?? {}));
   // Real-Debrid for torrents: shown when connected and not switched off.
-  const debridOffered = $derived(!!app.settings?.debridEnabled && !!app.settings?.debridKey && app.settings?.debridTorrents !== 'off');
+  const debridOffered = $derived(!!app.settings?.debridEnabled && !!app.settings?.debridKeys?.[app.settings.debridService] && app.settings?.debridTorrents !== 'off');
   const anyTorrent = $derived(links.some((l) => linkKind(l) === 'torrent'));
   // svelte-ignore state_referenced_locally
   let viaDebrid = $state(app.settings?.debridTorrents === 'always' || (app.settings?.debridTorrents === 'ask' && localStorage.getItem('haul:via-debrid') !== '0'));
@@ -143,6 +149,7 @@
         // Several links: each one goes where the sorting rules say.
         let n = 0;
         for (const l of links) {
+          if (skipDupes && findDuplicate(l)) continue;
           const k = linkKind(l);
           try {
             if (k === 'torrent') await api.addTorrent({ source: l, direct: true, debrid: useDebrid });
@@ -170,6 +177,7 @@
       void add();
     }
   }
+  const dname = $derived(debridName(app.settings?.debridService));
 </script>
 
 <Modal title="New download" width={640} onclose={close}>
@@ -182,9 +190,10 @@
 
     {#if links.length > 1}
       <p class="muted note"><Icon name="batch" size={14} /> {links.length} links{raw.length < links.length ? ' from the pattern' : ''}{mediaCount ? `, ${mediaCount} of them videos (saved with your usual video settings)` : ''}. Each goes to its category folder.</p>
+      {#if dupCount}<label class="dupnote"><input type="checkbox" bind:checked={skipDupes} /> Skip the {dupCount} already in your list</label>{/if}
       {#if raw.length < links.length}<p class="faint note mono">{links[0]}<br />… {links[links.length - 1]}</p>{/if}
     {:else if kind === 'torrent'}
-      <p class="muted note"><Icon name={useDebrid ? 'cloud' : 'magnet'} size={14} /> {useDebrid ? 'Real-Debrid downloads this torrent first, then Haul fetches the files at full speed.' : 'Torrent. You’ll pick files once Haul has its file list.'}</p>
+      <p class="muted note"><Icon name={useDebrid ? 'cloud' : 'magnet'} size={14} /> {useDebrid ? `${dname} downloads this torrent first, then Haul fetches the files at full speed.` : 'Torrent. You’ll pick files once Haul has its file list.'}</p>
     {:else if kind === 'http'}
       <div class="probe">
         {#if probing}<span class="spinner"></span><span class="muted">Checking the link…</span>
@@ -192,11 +201,12 @@
         {:else if probe}
           <Icon name="file" size={15} />
           <span>{probe.size ? bytes(probe.size) : 'Size unknown'}</span>
-          {#if probe.debrid}<span class="chip rd" title="This hoster link goes through Real-Debrid"><Icon name="cloud" size={12} />&nbsp;Real-Debrid</span>{/if}
+          {#if probe.debrid}<span class="chip rd" title="This hoster link goes through {dname}"><Icon name="cloud" size={12} />&nbsp;{dname}</span>{/if}
           {#if probe.stream}<span class="chip rd">Stream</span>{/if}
           <span class="chip" title={probe.resumable ? 'Can be paused and resumed, and uses several connections' : 'This server sends the file in one piece, so it can’t resume'}>{probe.resumable ? 'Resumable' : 'No resume'}</span>
         {/if}
       </div>
+      {#if dup}<Duplicate item={dup} />{/if}
       {#if probe?.safety && !probe.page}<Safety report={probe.safety} compact open={probe.safety.grade !== 'A'} />{/if}
       {#if probe?.page}
         <div class="pagebox">
@@ -234,7 +244,7 @@
     {/if}
 
     {#if anyTorrent && debridOffered}
-      <label class="check rdswitch"><Switch bind:checked={viaDebrid} label="Download through Real-Debrid" /> Download {links.length > 1 ? 'torrents ' : ''}through Real-Debrid</label>
+      <label class="check rdswitch"><Switch bind:checked={viaDebrid} label="Download through {dname}" /> Download {links.length > 1 ? 'torrents ' : ''}through {dname}</label>
     {/if}
     {#if kind !== 'torrent' && !probe?.page}
       <label class="check"><input type="checkbox" bind:checked={paused} /> Add paused</label>
@@ -266,5 +276,6 @@
   .grow { flex: 1; }
   .rd { background: color-mix(in srgb, var(--accent) 20%, transparent); color: var(--accent); }
   .rdswitch { gap: 10px; }
+  .dupnote { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--warn); cursor: pointer; }
   .pagebox { display: flex; align-items: center; gap: 10px; padding: 10px 12px; border-radius: 8px; border: 1px solid var(--line); background: var(--surface); font-size: 12.5px; }
 </style>

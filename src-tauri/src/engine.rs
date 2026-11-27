@@ -237,7 +237,7 @@ async fn tick(dt: f64) {
                 let renew = permanent
                     && model::with(|st| {
                         st.get_mut(id)
-                            .filter(|it| !it.debrid_link.is_empty() && !it.debrid_renewed && !f.text().starts_with("Real-Debrid"))
+                            .filter(|it| !it.debrid_link.is_empty() && !it.debrid_renewed && !debrid::is_service_error(&f.text()))
                             .map(|it| {
                                 it.debrid_renewed = true;
                                 it.source.clear();
@@ -672,6 +672,23 @@ fn scan_path(it: &Item) -> Option<std::path::PathBuf> {
     }
 }
 
+/// An existing download of the same link (or the same file name), newest first.
+pub fn duplicate_of(url: &str, name: &str) -> Option<u64> {
+    let norm = |u: &str| u.trim().trim_end_matches('/').to_ascii_lowercase();
+    let u = norm(url);
+    let n = model::sanitize(name.trim()).to_ascii_lowercase();
+    model::with(|st| {
+        st.items
+            .iter()
+            .rev()
+            .find(|it| {
+                (!u.is_empty() && (norm(&it.source) == u || norm(&it.final_url) == u || norm(&it.debrid_link) == u))
+                    || (!n.is_empty() && it.kind != Kind::Torrent && it.file_name.to_ascii_lowercase() == n)
+            })
+            .map(|it| it.id)
+    })
+}
+
 /// Runs the safety check on a download and stores the result. Blocking.
 pub fn scan_item(id: u64) -> Option<crate::safety::Report> {
     let it = model::with(|st| st.get(id).cloned())?;
@@ -963,7 +980,8 @@ pub fn add_torrent(a: TorrentAdd) -> Result<AddResult, String> {
     });
     {
         let mut r = rt();
-        if show_dialog {
+        // Only Real-Debrid lets you pick files before it starts; the others fetch it all.
+        if show_dialog && (!via_debrid || debrid::picks_files()) {
             r.awaiting.insert(id);
         }
         r.sources.insert(id, bytes);
@@ -1197,7 +1215,7 @@ async fn debrid_job(id: u64) -> Result<(), String> {
             }
             Err(e) => return Err(e),
         };
-        let phase = debrid::phase(&info.status);
+        let phase = debrid::phase_of(&info);
         model::with(|st| {
             if let Some(i) = st.get_mut(id) {
                 if !info.filename.is_empty() {
@@ -1265,7 +1283,7 @@ fn human(b: u64) -> String {
 async fn finish_debrid(id: u64, info: &debrid::TorrentInfo) -> Result<(), String> {
     let Some(it) = model::with(|st| st.get(id).cloned()) else { return Ok(()) };
     if info.links.is_empty() {
-        return Err("Real-Debrid finished but returned no files".into());
+        return Err(format!("{} finished but returned no files", debrid::name()));
     }
     let selected: Vec<&debrid::RdFile> = info.files.iter().filter(|f| f.selected == 1).collect();
     let (category, base) = if it.save_dir.is_empty() {
@@ -1279,7 +1297,7 @@ async fn finish_debrid(id: u64, info: &debrid::TorrentInfo) -> Result<(), String
     let root = model::sanitize(&info.filename);
     let mut entries = Vec::new();
     for (n, link) in info.links.iter().enumerate() {
-        model::with(|st| st.get_mut(id).map(|i| i.note = format!("Real-Debrid: getting links {}/{}", n + 1, info.links.len())));
+        model::with(|st| st.get_mut(id).map(|i| i.note = format!("{}: getting links {}/{}", debrid::name(), n + 1, info.links.len())));
         let u = loop {
             match debrid::unrestrict(link, "").await {
                 Ok(u) => break u,
@@ -1730,7 +1748,8 @@ mod tests {
         });
         let _ = debrid::TEST_BASE.set(format!("http://127.0.0.1:{port}"));
         settings::update(|s| {
-            s.debrid_key = crate::secret::seal("key123");
+            s.debrid_keys.insert("realdebrid".into(), crate::secret::seal("key123"));
+            s.debrid_service = "realdebrid".into();
             s.debrid_enabled = true;
             s.show_add_dialog = true;
             s.download_dir = dir.join("dl").to_string_lossy().to_string();
@@ -1778,6 +1797,6 @@ mod tests {
         assert_eq!(std::path::PathBuf::from(&second.save_dir), base.join("S01"));
 
         // A bad key gives a plain-language error.
-        assert!(debrid::account_for("wrong").await.unwrap_err().contains("API key"));
+        assert!(debrid::account_for(debrid::Service::RealDebrid, "wrong").await.unwrap_err().contains("API key"));
     }
 }

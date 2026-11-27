@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { debridName } from '../format.js';
   import Modal from './Modal.svelte';
   import Switch from './Switch.svelte';
   import { api, isTauri, type TorrentMeta } from '../api';
@@ -64,6 +65,7 @@
     ui.dialog = null;
     await api.cancelTorrent(meta.id).catch(() => {});
   }
+  const dname = $derived(debridName(app.settings?.debridService));
 </script>
 
 <Modal title={meta.name} width={720} onclose={cancel}>
@@ -85,7 +87,7 @@
       </label>
     </div>
     {#if meta.debrid}
-      <p class="muted rdnote">Real-Debrid downloads the files you pick, then Haul fetches them at full speed into this folder.</p>
+      <p class="muted rdnote">{dname} downloads the files you pick, then Haul fetches them at full speed into this folder.</p>
     {:else}
       <div class="flags">
         <label class="flag"><Switch bind:checked={sequential} label="Download in order" /> Download in order</label>
@@ -122,7 +124,7 @@
     <span class="muted hash mono" title="Info hash">{meta.hash}</span>
     <span class="grow"></span>
     <button class="btn" onclick={cancel}>Cancel</button>
-    <button class="btn primary" disabled={busy || !selectedCount} onclick={add}>{#if busy}<span class="spinner"></span>{/if}{meta.debrid ? 'Send to Real-Debrid' : 'Add torrent'}</button>
+    <button class="btn primary" disabled={busy || !selectedCount} onclick={add}>{#if busy}<span class="spinner"></span>{/if}{meta.debrid ? `Send to ${dname}` : 'Add torrent'}</button>
   {/snippet}
 </Modal>
 

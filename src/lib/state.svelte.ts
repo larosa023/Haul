@@ -29,7 +29,7 @@ export const app = $state({
 });
 
 export const ui = $state({
-  view: 'list' as 'list' | 'settings',
+  view: 'list' as 'list' | 'settings' | 'search',
   settingsTab: 'general',
   filter: 'all' as Filter,
   search: '',
@@ -197,4 +197,17 @@ export async function nextPending() {
     ui.view = 'list';
     ui.dialog = { kind: 'torrent', meta: list[0] };
   }
+}
+
+/** A download already in the list for this link (or with this file name), newest first. */
+export function findDuplicate(url: string, name = ''): Item | null {
+  const norm = (u: string) => u.trim().replace(/\/+$/, '').toLowerCase();
+  const u = norm(url);
+  const n = name.trim().toLowerCase();
+  for (let i = app.order.length - 1; i >= 0; i--) {
+    const it = app.items[app.order[i]];
+    if (!it) continue;
+    if ((u && norm(it.source) === u) || (n && it.kind !== 'torrent' && (it.fileName || it.name).toLowerCase() === n)) return it;
+  }
+  return null;
 }

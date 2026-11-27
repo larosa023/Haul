@@ -3,7 +3,7 @@
   import Icon from '../lib/components/Icon.svelte';
   import SettingRow from '../lib/components/SettingRow.svelte';
   import Switch from '../lib/components/Switch.svelte';
-  import { api, isTauri, type Adapter, type DebridState, type MediaOptions, type Rule, type Settings } from '../lib/api';
+  import { api, isTauri, type Adapter, type DebridService, type DebridState, type MediaOptions, type Rule, type Settings } from '../lib/api';
   import { app, ui, saveSettings, toast, errorText } from '../lib/state.svelte';
   import { THEMES, ACCENT_SWATCHES, cssVars, effectiveTheme, resolveAccent, themeToJson, type ThemeDef } from '../lib/themecore.js';
   import { themes, allThemes, reloadThemes, findTheme } from '../lib/theme.svelte';
@@ -17,7 +17,8 @@
     { id: 'torrents', label: 'Torrents', icon: 'magnet', blurb: 'Seeding, peers, privacy and ports' },
     { id: 'network', label: 'Network adapter', icon: 'network', blurb: 'Keep torrents on your VPN' },
     { id: 'safety', label: 'Safety', icon: 'shield', blurb: 'Safety scores, Windows Defender and VirusTotal' },
-    { id: 'debrid', label: 'Debrid', icon: 'cloud', blurb: 'Real-Debrid for file hosters and torrents' },
+    { id: 'debrid', label: 'Debrid', icon: 'cloud', blurb: 'Real-Debrid, AllDebrid, Premiumize or TorBox' },
+    { id: 'search', label: 'Torrent search', icon: 'search', blurb: 'Where Haul searches for torrents' },
     { id: 'browser', label: 'Browser', icon: 'puzzle', blurb: 'Send downloads from Chrome, Edge, Drift or Firefox' },
     { id: 'appearance', label: 'Appearance', icon: 'brush', blurb: 'Themes, accent color and layout' },
     { id: 'about', label: 'About & updates', icon: 'refresh', blurb: 'Version, updates and shortcuts' },
@@ -38,12 +39,28 @@
     if (ui.settingsTab === 'debrid' && isTauri && !rd) void api.debridStatus().then((s) => (rd = s));
   });
 
+  const SERVICES: { id: DebridService; name: string; keyUrl: string; keyPage: string; keyName: string }[] = [
+    { id: 'realdebrid', name: 'Real-Debrid', keyUrl: 'https://real-debrid.com/apitoken', keyPage: 'real-debrid.com/apitoken', keyName: 'API private token' },
+    { id: 'alldebrid', name: 'AllDebrid', keyUrl: 'https://alldebrid.com/apikeys/', keyPage: 'alldebrid.com/apikeys', keyName: 'API key' },
+    { id: 'premiumize', name: 'Premiumize', keyUrl: 'https://www.premiumize.me/account', keyPage: 'premiumize.me/account', keyName: 'API key' },
+    { id: 'torbox', name: 'TorBox', keyUrl: 'https://torbox.app/settings', keyPage: 'torbox.app/settings', keyName: 'API key' },
+  ];
+  // svelte-ignore state_referenced_locally
+  let svcTab: DebridService = $state(app.settings?.debridService ?? 'realdebrid');
+  const svc = $derived(SERVICES.find((x) => x.id === svcTab)!);
+  const active = $derived(SERVICES.find((x) => x.id === s.debridService)!);
+
+  async function rdUse(id: DebridService) {
+    rd = await api.debridUse(id);
+    toast(`Haul now uses ${SERVICES.find((x) => x.id === id)?.name}`, 'success');
+  }
+
   async function rdConnect() {
     rdBusy = true;
     try {
-      rd = await api.debridConnect(rdKey);
+      rd = await api.debridConnect(rdKey, svcTab);
       rdKey = '';
-      toast(`Connected to Real-Debrid as ${rd.account?.username ?? ''}`, 'success');
+      toast(`Connected to ${svc.name}${rd.account?.username ? ` as ${rd.account.username}` : ''}`, 'success');
     } catch (e) {
       toast(errorText(e), 'error', 8000);
     } finally {
@@ -52,8 +69,8 @@
   }
 
   async function rdDisconnect() {
-    app.settings = await api.debridDisconnect();
-    rd = { connected: false, account: null, error: '' };
+    app.settings = await api.debridDisconnect(svcTab);
+    rd = await api.debridStatus();
   }
 
   // ---- video & music tools, Hugging Face
@@ -101,6 +118,24 @@
   async function hfDisconnect() {
     app.settings = await api.hfDisconnect();
     hfUser = '';
+  }
+
+  // ---- torrent search sources
+  let ixName = $state('');
+  let ixUrl = $state('');
+  let ixKey = $state('');
+  let ixBusy = $state(false);
+  async function addIndexer() {
+    ixBusy = true;
+    try {
+      app.settings = await api.searchAddIndexer({ name: ixName, url: ixUrl, key: ixKey });
+      toast('Indexer added', 'success');
+      ixName = ixUrl = ixKey = '';
+    } catch (e) {
+      toast(errorText(e), 'error', 8000);
+    } finally {
+      ixBusy = false;
+    }
   }
 
   // ---- safety
@@ -593,32 +628,39 @@
         <p class="faint small">A score is a guide, not a guarantee: a well-made threat can still look clean, and a safe tool can look unusual. When in doubt, don't run programs from sites you don't know.</p>
 
       {:else if section.id === 'debrid'}
-        {#if s.debridKey && rd?.connected !== false}
+        <div class="seg svcs" role="tablist" aria-label="Debrid service">
+          {#each SERVICES as x (x.id)}
+            <button class:on={svcTab === x.id} role="tab" aria-selected={svcTab === x.id} onclick={() => (svcTab = x.id)}>
+              {x.name}{#if s.debridKeys?.[x.id]}<span class="saved" class:inuse={s.debridService === x.id} title={s.debridService === x.id ? 'In use' : 'Key saved'}></span>{/if}
+            </button>
+          {/each}
+        </div>
+        {#if s.debridKeys?.[svcTab] && svcTab === s.debridService && rd?.connected !== false}
           <div class="status-card">
             <span class="dot" class:good={!!rd?.account && rd.account.kind === 'premium'}></span>
             <div>
               {#if rd?.account}
-                <strong>Real-Debrid · {rd.account.username}</strong>
+                <strong>{svc.name}{rd.account.username ? ` · ${rd.account.username}` : ''}</strong>
                 <div class="muted small">
-                  {rd.account.kind === 'premium' ? `Premium · ${daysLeft(rd.account.premium)} days left${rd.account.expiration ? ` (until ${new Date(rd.account.expiration).toLocaleDateString()})` : ''}` : 'Free account: most features need premium'}
+                  {rd.account.kind === 'premium' ? `Premium${rd.account.premium ? ` · ${daysLeft(rd.account.premium)} days left` : ''}${rd.account.expiration ? ` (until ${new Date(rd.account.expiration).toLocaleDateString()})` : ''}` : 'Free account: most features need premium'}
                 </div>
               {:else if rd?.error}
-                <strong>Real-Debrid</strong><div class="bad small">{rd.error}</div>
+                <strong>{svc.name}</strong><div class="bad small">{rd.error}</div>
               {:else}
-                <strong>Real-Debrid</strong><div class="muted small">Checking your account…</div>
+                <strong>{svc.name}</strong><div class="muted small">Checking your account…</div>
               {/if}
             </div>
             <span class="grow"></span>
             <button class="btn sm ghost" onclick={rdDisconnect}>Disconnect</button>
           </div>
           <div class="group" style="margin-top: 10px">
-            <SettingRow title="Use Real-Debrid" description="Switch it off to download everything directly again, without removing your key.">
-              <Switch checked={s.debridEnabled} label="Use Real-Debrid" onchange={(v) => set('debridEnabled', v)} />
+            <SettingRow title="Use {svc.name}" description="Switch it off to download everything directly again, without removing your key.">
+              <Switch checked={s.debridEnabled} label="Use {svc.name}" onchange={(v) => set('debridEnabled', v)} />
             </SettingRow>
-            <SettingRow title="File hoster links" description="Links from hosters Real-Debrid supports (1fichier, Rapidgator, Mega and many more) download at premium speed, with Haul’s multiple connections. Expired links are renewed automatically.">
+            <SettingRow title="File hoster links" description="Links from hosters {svc.name} supports (1fichier, Rapidgator, Mega and many more) download at premium speed, with Haul’s multiple connections. Expired links are renewed automatically.">
               <Switch checked={s.debridHosters} label="File hoster links" onchange={(v) => set('debridHosters', v)} />
             </SettingRow>
-            <SettingRow title="Torrents" description="Real-Debrid downloads the torrent on its servers (cached ones are instant), then Haul fetches the files over HTTPS. No seeding, and no torrent traffic from your PC.">
+            <SettingRow title="Torrents" description="{svc.name} downloads the torrent on its servers (cached ones are instant), then Haul fetches the files over HTTPS. No seeding, and no torrent traffic from your PC.">
               <div class="seg">
                 {#each [['off', 'Off'], ['ask', 'Ask each time'], ['always', 'Always']] as [v, l] (v)}
                   <button class:on={s.debridTorrents === v} onclick={() => set('debridTorrents', v as Settings['debridTorrents'])}>{l}</button>
@@ -626,23 +668,57 @@
               </div>
             </SettingRow>
           </div>
-          <p class="faint small">“Ask each time” adds a Real-Debrid switch to the New download window, and magnet links you click open it.</p>
+          <p class="faint small">“Ask each time” adds a {svc.name} switch to the New download window, and magnet links you click open it.{svcTab !== 'realdebrid' ? ` ${svc.name} fetches the whole torrent; choosing files before it starts is a Real-Debrid feature.` : ''}</p>
+        {:else if s.debridKeys?.[svcTab]}
+          <div class="group connect">
+            <p>Your <strong>{svc.name}</strong> key is saved. Haul is using <strong>{active.name}</strong> right now.</p>
+            <div class="pathrow">
+              <button class="btn primary" onclick={() => rdUse(svcTab)}>Use {svc.name} instead</button>
+              <button class="btn ghost" onclick={rdDisconnect}>Remove key</button>
+            </div>
+          </div>
         {:else}
           <div class="group connect">
-            <p>Connect your <strong>Real-Debrid</strong> account to download from file hosters at premium speed, and to have torrents downloaded on Real-Debrid’s servers.</p>
+            <p>Connect your <strong>{svc.name}</strong> account to download from file hosters at premium speed, and to have torrents downloaded on {svc.name}’s servers.</p>
             <ol>
-              <li>Sign in at real-debrid.com and open <button class="link" onclick={() => api.openLink('https://real-debrid.com/apitoken')}>real-debrid.com/apitoken</button>.</li>
-              <li>Copy your API private token and paste it here.</li>
+              <li>Sign in at {svc.keyPage.split('/')[0]} and open <button class="link" onclick={() => api.openLink(svc.keyUrl)}>{svc.keyPage}</button>.</li>
+              <li>Copy your {svc.keyName} and paste it here.</li>
             </ol>
             <div class="pathrow">
-              <input class="input mono" type="password" bind:value={rdKey} placeholder="API private token" spellcheck="false" autocomplete="off"
+              <input class="input mono" type="password" bind:value={rdKey} placeholder={svc.keyName} spellcheck="false" autocomplete="off"
                 onkeydown={(e) => e.key === 'Enter' && rdKey.trim() && rdConnect()} />
               <button class="btn primary" disabled={!rdKey.trim() || rdBusy} onclick={rdConnect}>{#if rdBusy}<span class="spinner"></span>{/if}Connect</button>
             </div>
-            {#if rd?.error}<p class="bad small">{rd.error}</p>{/if}
-            <p class="faint small">The key is stored encrypted for your Windows account, and is only ever sent to Real-Debrid.</p>
+            {#if rd?.error && svcTab === s.debridService}<p class="bad small">{rd.error}</p>{/if}
+            <p class="faint small">The key is stored encrypted for your Windows account, and is only ever sent to {svc.name}. Connecting makes {svc.name} the service Haul uses; other saved keys stay for switching back.</p>
           </div>
         {/if}
+
+      {:else if section.id === 'search'}
+        <p class="muted small">Search torrents from the <strong>Search</strong> button in the sidebar. Haul asks every source below at once and sorts the results by seeders.</p>
+        <div class="group">
+          <SettingRow title="Internet Archive" description="Public-domain films, music, software and books. Every item has a torrent.">
+            <Switch checked={s.searchArchive} label="Internet Archive" onchange={(v) => set('searchArchive', v)} />
+          </SettingRow>
+          {#each s.searchIndexers as ix (ix.url)}
+            <SettingRow title={ix.name} description={ix.url}>
+              <div class="pathrow">
+                <button class="icon-btn" title="Remove" onclick={async () => (app.settings = await api.searchRemoveIndexer(ix.url))}><Icon name="trash" size={14} /></button>
+                <Switch checked={ix.enabled} label={ix.name} onchange={async (v) => (app.settings = await api.searchToggleIndexer(ix.url, v))} />
+              </div>
+            </SettingRow>
+          {/each}
+        </div>
+        <h3>Add a Torznab indexer</h3>
+        <div class="group connect">
+          <p class="small">Torznab is the standard feed that <button class="link" onclick={() => api.openLink('https://prowlarr.com')}>Prowlarr</button> and <button class="link" onclick={() => api.openLink('https://github.com/Jackett/Jackett')}>Jackett</button> provide for the sites you add to them. In Prowlarr, open an indexer and copy its Torznab URL (like <span class="mono">http://localhost:9696/1/api</span>) and your API key from Settings › General. In Jackett, use <strong>Copy Torznab Feed</strong> (or the “All” feed) and the API key at the top.</p>
+          <div class="ixform">
+            <input class="input" bind:value={ixName} placeholder="Name (optional)" spellcheck="false" />
+            <input class="input mono" bind:value={ixUrl} placeholder="Torznab URL" spellcheck="false" />
+            <input class="input mono" type="password" bind:value={ixKey} placeholder="API key" spellcheck="false" autocomplete="off" />
+            <button class="btn primary" disabled={!ixUrl.trim() || ixBusy} onclick={addIndexer}>{#if ixBusy}<span class="spinner"></span>{/if}Test and add</button>
+          </div>
+        </div>
 
       {:else if section.id === 'browser'}
         <div class="group">
@@ -723,6 +799,19 @@
             <Switch checked={s.nativeTitleBar} label="Windows title bar" onchange={(v) => set('nativeTitleBar', v)} />
           </SettingRow>
         </div>
+        <h3>Download tracking style</h3>
+        <div class="pstyles" role="radiogroup" aria-label="Progress style">
+          {#each [['glow', 'Glow', 'Soft light with a sheen'], ['classic', 'Classic', 'Flat and calm'], ['striped', 'Striped', 'Moving candy stripes'], ['aurora', 'Aurora', 'Shifting colours'], ['blocks', 'Blocks', 'Retro segments'], ['minimal', 'Minimal', 'A hairline'], ['neon', 'Neon', 'Bright, pulsing outline']] as [id, name, hint], n (id)}
+            <button class="ps" class:on={(s.progressStyle || 'glow') === id} role="radio" aria-checked={(s.progressStyle || 'glow') === id} onclick={() => set('progressStyle', id)} data-progress={id}>
+              <span class="pgv run">
+                <span class="bar"><span class="fill" style="width: {[72, 58, 64, 81, 47, 69, 55][n]}%"></span></span>
+                <span class="bar"><span class="fill" style="width: {[38, 87, 29, 52, 76, 33, 90][n]}%"></span></span>
+              </span>
+              <span class="pvl"><span>{name}</span><small>{hint}</small></span>
+            </button>
+          {/each}
+        </div>
+
 
       {:else if section.id === 'about'}
         <div class="about group">
@@ -762,7 +851,7 @@
         </div>
         <h3>Keyboard</h3>
         <div class="group keys">
-          {#each [['Ctrl+N', 'New download'], ['Ctrl+O', 'Open .torrent file'], ['Ctrl+V', 'Paste a link to download it'], ['Space', 'Pause / resume'], ['Del', 'Remove (with an option to delete files)'], ['Enter / Shift+Enter', 'Open / show in folder'], ['↑ ↓, Shift for more', 'Select'], ['Ctrl+A', 'Select all'], ['Alt+↑ / Alt+↓', 'Move in the queue (Ctrl for top / bottom)'], ['Ctrl+F', 'Search'], ['F2', 'Details panel'], ['Ctrl+,', 'Settings'], [s.miniHotkey || '—', 'Mini window (anywhere in Windows)'], ['Esc', 'Back / clear']] as [k, d] (k)}
+          {#each [['Ctrl+N', 'New download'], ['Ctrl+O', 'Open .torrent file'], ['Ctrl+V', 'Paste a link to download it'], ['Space', 'Pause / resume'], ['Del', 'Remove (with an option to delete files)'], ['Enter / Shift+Enter', 'Open / show in folder'], ['↑ ↓, Shift for more', 'Select'], ['Ctrl+A', 'Select all'], ['Alt+↑ / Alt+↓', 'Move in the queue (Ctrl for top / bottom)'], ['Ctrl+F', 'Search'], ['F2', 'Details panel'], ['Ctrl+,', 'Settings'], ['Ctrl+K', 'Search torrents'], [s.miniHotkey || '—', 'Mini window (anywhere in Windows)'], ['Esc', 'Back / clear']] as [k, d] (k)}
             <div class="key"><span class="kbd">{k}</span><span>{d}</span></div>
           {/each}
         </div>
@@ -821,6 +910,17 @@
   .status-card .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--warn); flex-shrink: 0; }
   .status-card .dot.good { background: var(--ok); box-shadow: 0 0 8px var(--ok); }
   .connect { padding: 14px 16px; font-size: 13px; }
+  .svcs { margin-bottom: 12px; }
+  .svcs button { display: inline-flex; align-items: center; gap: 6px; }
+  .saved { width: 6px; height: 6px; border-radius: 50%; background: var(--text-3); }
+  .saved.inuse { background: var(--ok); box-shadow: 0 0 6px var(--ok); }
+  .ixform { display: grid; grid-template-columns: 1fr 2fr 1.2fr auto; gap: 6px; }
+  .pstyles { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 8px; margin-bottom: 8px; }
+  .ps { display: flex; flex-direction: column; gap: 9px; padding: 12px 12px 10px; border-radius: 10px; border: 1px solid var(--line); background: var(--surface); cursor: pointer; text-align: left; color: var(--text); transition: border-color var(--dur), background var(--dur); }
+  .ps:hover { background: var(--surface-hover); }
+  .ps.on { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset; }
+  .ps .pvl { display: flex; flex-direction: column; gap: 1px; font-size: 12.5px; font-weight: 600; }
+  .ps .pvl small { color: var(--text-3); font-size: 11px; font-weight: 400; }
   .connect p { margin: 0 0 8px; }
   .connect ol { margin: 0 0 12px; padding-left: 20px; line-height: 1.7; }
   .connect .pathrow .input { flex: 1; }

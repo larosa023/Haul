@@ -8,6 +8,17 @@ use crate::paths;
 
 pub const CATEGORIES: &[&str] = &["Video", "Music", "Games", "Software", "Archives", "Documents", "Images", "Other"];
 
+/// A Torznab indexer for torrent search (Prowlarr, Jackett or a site's own feed).
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Default)]
+#[serde(rename_all = "camelCase", default)]
+pub struct Indexer {
+    pub name: String,
+    pub url: String,
+    /// API key (sealed).
+    pub key: String,
+    pub enabled: bool,
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[serde(rename_all = "camelCase", default)]
 pub struct Rule {
@@ -140,10 +151,18 @@ pub struct Settings {
     pub safety_motw: bool,
     /// Optional VirusTotal API key (sealed); only file hashes are looked up.
     pub vt_key: String,
-    // Debrid (Real-Debrid)
+    // Torrent search
+    pub search_archive: bool,
+    pub search_indexers: Vec<Indexer>,
+    // Debrid
     pub debrid_enabled: bool,
     /// The API key, encrypted for this Windows account (see secret.rs).
+    /// Legacy (0.2): the Real-Debrid key, moved into `debrid_keys`.
     pub debrid_key: String,
+    /// "realdebrid", "alldebrid", "premiumize" or "torbox".
+    pub debrid_service: String,
+    /// API keys by service (sealed).
+    pub debrid_keys: std::collections::BTreeMap<String, String>,
     /// Send links from supported file hosters through Real-Debrid.
     pub debrid_hosters: bool,
     /// Torrents through Real-Debrid: "off" | "ask" | "always".
@@ -161,6 +180,8 @@ pub struct Settings {
     pub compact_rows: bool,
     /// Show speeds in bits (Mbps), like internet plans, instead of bytes (MB/s).
     pub speed_bits: bool,
+    /// How progress looks: glow, classic, striped, aurora, blocks, minimal or neon.
+    pub progress_style: String,
 
     // Updates
     pub auto_update: bool,
@@ -239,8 +260,12 @@ impl Default for Settings {
             safety_defender: true,
             safety_motw: true,
             vt_key: String::new(),
+            search_archive: true,
+            search_indexers: Vec::new(),
             debrid_enabled: true,
             debrid_key: String::new(),
+            debrid_service: "realdebrid".into(),
+            debrid_keys: Default::default(),
             debrid_hosters: true,
             debrid_torrents: "ask".into(),
             bridge_enabled: true,
@@ -250,6 +275,7 @@ impl Default for Settings {
             native_title_bar: false,
             compact_rows: false,
             speed_bits: false,
+            progress_style: "glow".into(),
             auto_update: true,
             channel: "stable".into(),
             skip_version: String::new(),
@@ -260,7 +286,7 @@ impl Default for Settings {
             mini_x: 0,
             mini_y: 0,
             mini_saved: false,
-            schema: 3,
+            schema: 4,
             window: WindowState::default(),
             initialized: false,
         }
@@ -298,6 +324,15 @@ fn load() -> Settings {
             s.connections = 0;
         }
         s.schema = 3;
+    }
+    if s.schema < 4 {
+        if !s.debrid_key.is_empty() {
+            s.debrid_keys.insert("realdebrid".into(), std::mem::take(&mut s.debrid_key));
+        }
+        s.schema = 4;
+    }
+    if s.debrid_service.is_empty() {
+        s.debrid_service = "realdebrid".into();
     }
     s.connections = s.connections.min(32);
     s

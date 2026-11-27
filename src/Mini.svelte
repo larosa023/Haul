@@ -20,6 +20,7 @@
 
   $effect(() => {
     if (app.settings) setSpeedBits(app.settings.speedBits);
+    document.documentElement.dataset.progress = app.settings?.progressStyle || 'glow';
   });
 
   $effect(() => {
@@ -59,9 +60,9 @@
 
   <div class="list">
     {#each shown as it (it.id)}
-      <div class="it">
+      <div class="it" class:run={it.status === 'downloading'}>
         <div class="top"><span class="nm" title={it.name}>{it.name}</span><span class="pc">{it.size ? `${Math.floor(percent(it.done, it.size))}%` : ''}</span></div>
-        <div class="bar"><span style="width: {percent(it.done, it.size)}%"></span></div>
+        <div class="bar"><span class="fill" style="width: {percent(it.done, it.size)}%"></span></div>
         <div class="sub"><span>{speed(it.speedDown) || it.note || (it.status === 'queued' ? 'Queued' : '')}</span><span>{eta(it.eta)}</span></div>
       </div>
     {:else}
@@ -103,7 +104,8 @@
   .pc { color: var(--text-2); font-variant-numeric: tabular-nums; }
   .sub { font-size: 11px; color: var(--text-3); font-variant-numeric: tabular-nums; }
   .bar { height: 4px; border-radius: 2px; background: var(--surface-strong); overflow: hidden; }
-  .bar span { display: block; height: 100%; background: var(--accent); transition: width 900ms linear; }
+  .bar { position: relative; }
+  .fill { position: absolute; inset: 0 auto 0 0; display: block; background: var(--accent); border-radius: 2px; transition: width 900ms linear; }
   .empty { flex: 1; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; color: var(--text-3); font-size: 12.5px; }
   .more { font-size: 11.5px; color: var(--text-3); text-align: center; }
   footer { display: flex; align-items: center; gap: 8px; padding: 8px 10px; border-top: 1px solid var(--line); }

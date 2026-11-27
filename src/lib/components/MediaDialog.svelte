@@ -3,8 +3,9 @@
   import Modal from './Modal.svelte';
   import Icon from './Icon.svelte';
   import Switch from './Switch.svelte';
+  import Duplicate from './Duplicate.svelte';
   import { api, isTauri, type MediaInfo, type MediaOptions } from '../api';
-  import { app, ui, toast, errorText, selectOnly, saveSettings } from '../state.svelte';
+  import { app, ui, toast, errorText, selectOnly, saveSettings, findDuplicate } from '../state.svelte';
   import { bytes, clock } from '../format.js';
 
   let { url, referrer = '' }: { url: string; referrer?: string } = $props();
@@ -120,6 +121,8 @@
         </div>
       </div>
 
+      {@const dup = playlist ? null : findDuplicate(info.url || url) ?? findDuplicate(url)}
+      {#if dup}<Duplicate item={dup} />{/if}
       <div class="seg" role="radiogroup" aria-label="Video or audio">
         <button class:on={opts.mode === 'video'} role="radio" aria-checked={opts.mode === 'video'} onclick={() => (opts.mode = 'video')}><Icon name="video" size={15} />Video</button>
         <button class:on={opts.mode === 'audio'} role="radio" aria-checked={opts.mode === 'audio'} onclick={() => (opts.mode = 'audio')}><Icon name="music" size={15} />Audio only</button>

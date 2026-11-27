@@ -1,0 +1,86 @@
+/* Progress styles ("themes" for download tracking). Chosen in Settings → Appearance and set as
+   data-progress on <html>; the previews in Settings set it on their own box. @scope makes the
+   nearest one win, so a preview shows its own style inside a window using another.
+   Running bars: .row.run (list), .it.run (mini window), .part.active (connection map). */
+
+/* The previews in Settings (plain, low-specificity base = the Glow style). */
+.pgv { display: flex; flex-direction: column; gap: 4px; }
+.pgv .bar { position: relative; display: block; height: 6px; border-radius: 3px; background: var(--surface-strong); overflow: hidden; }
+.pgv .fill { position: absolute; inset: 0 auto 0 0; border-radius: 3px; background: linear-gradient(90deg, color-mix(in srgb, var(--accent) 55%, var(--surface-strong)), var(--accent)); box-shadow: 0 0 8px color-mix(in srgb, var(--accent) 45%, transparent); overflow: hidden; }
+.pgv .fill::after { content: ''; position: absolute; inset: 0; background: linear-gradient(90deg, transparent, rgb(255 255 255 / 0.35), transparent); transform: translateX(-100%); animation: pv-sheen 1.8s ease-in-out infinite; }
+@keyframes pv-sheen { to { transform: translateX(100%); } }
+
+@scope ([data-progress='classic']) {
+  .row.run .bar.bar .fill, .it.run .bar.bar .fill, .pgv.run .bar.bar .fill { background: var(--accent); box-shadow: none; }
+  .row.run .bar.bar .fill::after, .it.run .bar.bar .fill::after, .pgv.run .bar.bar .fill::after { display: none; }
+  .row.run .bar.bar, .pgv.run .bar.bar { height: 5px; }
+  .map.map .part.part.active .fill { background: var(--accent); }
+  .map.map .part.part.active .fill::after { display: none; }
+}
+
+@scope ([data-progress='striped']) {
+  .row.run .bar.bar .fill, .it.run .bar.bar .fill, .pgv.run .bar.bar .fill {
+    background-color: var(--accent);
+    background-image: repeating-linear-gradient(-45deg, rgb(255 255 255 / 0.28) 0 6px, transparent 6px 12px);
+    background-size: 17px 17px;
+    box-shadow: none;
+    animation: haul-stripes 0.7s linear infinite;
+  }
+  .row.run .bar.bar .fill::after, .it.run .bar.bar .fill::after, .pgv.run .bar.bar .fill::after { display: none; }
+  .row.run .bar.bar, .pgv.run .bar.bar { height: 8px; border-radius: 4px; }
+  .map.map .part.part.active .fill { background-image: repeating-linear-gradient(-45deg, rgb(255 255 255 / 0.25) 0 4px, transparent 4px 8px); background-color: var(--accent); }
+}
+
+@scope ([data-progress='aurora']) {
+  .row.run .bar.bar .fill, .it.run .bar.bar .fill, .pgv.run .bar.bar .fill {
+    background: linear-gradient(90deg, var(--accent), color-mix(in oklch, var(--accent), #ff4fd8 55%), color-mix(in oklch, var(--accent), #3ce0ff 55%), var(--accent));
+    background-size: 300% 100%;
+    box-shadow: 0 0 10px color-mix(in srgb, var(--accent) 45%, transparent);
+    animation: haul-aurora 3.2s linear infinite;
+  }
+  .row.run .bar.bar .fill::after, .it.run .bar.bar .fill::after, .pgv.run .bar.bar .fill::after { display: none; }
+  .row.run .bar.bar, .pgv.run .bar.bar { height: 7px; border-radius: 4px; }
+  .map.map .part.part.active .fill { background: linear-gradient(90deg, color-mix(in oklch, var(--accent), #ff4fd8 45%), color-mix(in oklch, var(--accent), #3ce0ff 45%)); }
+}
+
+@scope ([data-progress='blocks']) {
+  .row .bar.bar, .it .bar.bar, .pgv .bar.bar { height: 9px; border-radius: 2px; }
+  .row .bar.bar, .it .bar.bar, .pgv .bar.bar, .row .bar.bar .fill, .it .bar.bar .fill, .pgv .bar.bar .fill {
+    -webkit-mask: repeating-linear-gradient(90deg, #000 0 7px, transparent 7px 9px);
+    mask: repeating-linear-gradient(90deg, #000 0 7px, transparent 7px 9px);
+  }
+  .row .bar.bar .fill, .it .bar.bar .fill, .pgv .bar.bar .fill { border-radius: 0; transition: width 900ms steps(6, end); }
+  .row.run .bar.bar .fill, .it.run .bar.bar .fill, .pgv.run .bar.bar .fill { background: var(--accent); box-shadow: none; }
+  .row.run .bar.bar .fill::after, .it.run .bar.bar .fill::after, .pgv.run .bar.bar .fill::after { display: none; }
+  .map { border-radius: 2px; }
+  .map.map .part.part .fill { background-image: repeating-linear-gradient(90deg, transparent 0 5px, var(--bg) 5px 6px); }
+}
+
+@scope ([data-progress='minimal']) {
+  .row .bar.bar, .it .bar.bar, .pgv .bar.bar { height: 2px !important; border-radius: 1px; background: color-mix(in srgb, var(--text) 10%, transparent); }
+  .row.run .bar.bar .fill, .it.run .bar.bar .fill, .pgv.run .bar.bar .fill { background: var(--accent); box-shadow: none; }
+  .row.run .bar.bar .fill::after, .it.run .bar.bar .fill::after, .pgv.run .bar.bar .fill::after { display: none; }
+  .map { height: 6px; }
+  .map.map .part.part.active .fill::after { display: none; }
+}
+
+@scope ([data-progress='neon']) {
+  .row.run .bar.bar, .it.run .bar.bar, .pgv.run .bar.bar { height: 8px; border-radius: 5px; background: transparent; box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 55%, transparent); overflow: visible; }
+  .row.run .bar.bar .fill, .it.run .bar.bar .fill, .pgv.run .bar.bar .fill {
+    inset: 2px auto 2px 2px;
+    border-radius: 3px;
+    background: color-mix(in srgb, var(--accent) 70%, #fff);
+    box-shadow: 0 0 6px var(--accent), 0 0 14px color-mix(in srgb, var(--accent) 70%, transparent);
+    animation: haul-neon 1.6s ease-in-out infinite;
+  }
+  .row.run .bar.bar .fill::after, .it.run .bar.bar .fill::after, .pgv.run .bar.bar .fill::after { display: none; }
+  .map.map .part.part.active .fill { box-shadow: 0 0 8px var(--accent); }
+}
+
+@keyframes haul-stripes { to { background-position: 17px 0; } }
+@keyframes haul-aurora { to { background-position: -300% 0; } }
+@keyframes haul-neon { 50% { box-shadow: 0 0 3px var(--accent), 0 0 8px color-mix(in srgb, var(--accent) 50%, transparent); } }
+
+@media (prefers-reduced-motion: reduce) {
+  [data-progress] .fill { animation: none !important; }
+}

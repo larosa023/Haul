@@ -28,9 +28,9 @@
 </script>
 
 <header class="top" data-tauri-drag-region>
-  {#if ui.view === 'settings'}
+  {#if ui.view === 'settings' || ui.view === 'search'}
     <button class="icon-btn" title="Back (Esc)" onclick={() => (ui.view = 'list')}><Icon name="chevronLeft" /></button>
-    <h1 data-tauri-drag-region>Settings</h1>
+    <h1 data-tauri-drag-region>{ui.view === 'search' ? 'Torrent search' : 'Settings'}</h1>
   {:else}
     <div class="search">
       <Icon name="search" size={15} />

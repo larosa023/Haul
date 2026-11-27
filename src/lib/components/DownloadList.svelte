@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { debridName } from '../format.js';
   import { onMount } from 'svelte';
   import Icon from './Icon.svelte';
   import { api, type Item } from '../api';
@@ -94,6 +95,7 @@
     if (it.kind === 'media') return it.media || it.category;
     return it.category || (it.kind === 'torrent' ? 'Torrent' : '');
   }
+  const dname = $derived(debridName(app.settings?.debridService));
 </script>
 
 <svelte:window onpaste={onPaste} />
@@ -139,7 +141,7 @@
             onkeydown={() => {}}
           >
             <span class="c-name">
-              <span class="kind" title={it.debrid ? 'Through Real-Debrid' : undefined}><Icon name={it.kind === 'debrid' || it.debrid ? 'cloud' : it.kind === 'torrent' ? 'magnet' : it.kind === 'media' ? (it.category === 'Music' ? 'music' : 'video') : 'file'} size={16} /></span>
+              <span class="kind" title={it.debrid ? `Through ${dname}` : undefined}><Icon name={it.kind === 'debrid' || it.debrid ? 'cloud' : it.kind === 'torrent' ? 'magnet' : it.kind === 'media' ? (it.category === 'Music' ? 'music' : 'video') : 'file'} size={16} /></span>
               <span class="names">
                 <span class="title" title={it.name}>{it.name}</span>
                 {#if !compact}<span class="subline" class:errtext={it.status === 'error'} title={sub(it)}>{sub(it)}</span>{/if}

@@ -1,4 +1,5 @@
 <script lang="ts">
+  import { debridName } from '../format.js';
   import Icon from './Icon.svelte';
   import Switch from './Switch.svelte';
   import SpeedGraph from './SpeedGraph.svelte';
@@ -119,6 +120,7 @@
   $effect(() => {
     if (!tabs.includes(ui.detailsTab)) ui.detailsTab = 'general';
   });
+  const dname = $derived(debridName(app.settings?.debridService));
 </script>
 
 <section class="details" style="height: {height}px">
@@ -164,10 +166,10 @@
             <span class="k">Link</span><span class="v copyable"><span class="url" title={it.source}>{it.source}</span><button class="icon-btn small" title="Copy link" onclick={() => copy(it.source)}><Icon name="copy" size={13} /></button></span>
             <span class="k">Format</span><span class="v">{it.media || '—'} · downloaded with yt-dlp{it.size ? '' : ' (size known once it starts)'}</span>
           {:else if it.kind === 'debrid'}
-            <span class="k">Real-Debrid</span><span class="v">{it.note || 'Waiting for Real-Debrid'}. When it’s done, the files download here at full speed.</span>
+            <span class="k">{dname}</span><span class="v">{it.note || `Waiting for ${dname}`}. When it’s done, the files download here at full speed.</span>
           {:else}
             <span class="k">Link</span><span class="v copyable"><span class="url" title={it.source}>{it.source}</span><button class="icon-btn small" title="Copy link" onclick={() => copy(it.source)}><Icon name="copy" size={13} /></button></span>
-            {#if it.debrid}<span class="k">Through</span><span class="v">Real-Debrid (the link is renewed automatically if it expires)</span>{/if}
+            {#if it.debrid}<span class="k">Through</span><span class="v">{dname} (the link is renewed automatically if it expires)</span>{/if}
             <span class="k">Connections</span><span class="v">{it.resumable ? `${it.segments || '—'} parts · resumable` : it.size ? 'Single connection (server can’t resume)' : '—'}</span>
             {#if it.sha256}<span class="k">SHA-256</span><span class="v mono">{it.sha256} {it.hashState === 'ok' ? '✓ verified' : it.hashState === 'mismatch' ? '✗ mismatch' : it.hashState === 'checking' ? '(checking…)' : '(checked when done)'}</span>{/if}
           {/if}

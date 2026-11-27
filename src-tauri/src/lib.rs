@@ -19,6 +19,7 @@ mod notify;
 mod paths;
 mod settings;
 mod safety;
+mod search;
 mod sorter;
 mod tools;
 mod torrent;
@@ -296,6 +297,12 @@ pub fn run() {
             commands::add_http,
             commands::debrid_connect,
             commands::debrid_disconnect,
+            commands::debrid_use,
+            commands::search_torrents,
+            commands::search_add,
+            commands::search_add_indexer,
+            commands::search_remove_indexer,
+            commands::search_toggle_indexer,
             commands::debrid_status,
             commands::add_torrent,
             commands::confirm_torrent,

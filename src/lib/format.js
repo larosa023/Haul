@@ -221,3 +221,9 @@ export function clock(secs) {
   const ss = String(s % 60).padStart(2, '0');
   return h ? `${h}:${String(m).padStart(2, '0')}:${ss}` : `${m}:${ss}`;
 }
+
+const DEBRID_NAMES = { realdebrid: 'Real-Debrid', alldebrid: 'AllDebrid', premiumize: 'Premiumize', torbox: 'TorBox' };
+/** Display name of a debrid service id. */
+export function debridName(id) {
+  return DEBRID_NAMES[id] ?? 'Real-Debrid';
+}
