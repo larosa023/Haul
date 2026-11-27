@@ -76,6 +76,8 @@ pub struct GhAsset {
     pub size: u64,
     #[serde(default)]
     pub digest: Option<String>,
+    #[serde(default)]
+    pub updated_at: Option<String>,
 }
 
 #[derive(Deserialize, Debug, Clone)]

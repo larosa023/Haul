@@ -3,9 +3,9 @@
 use serde::Serialize;
 use tauri::{AppHandle, Manager};
 
-use crate::engine::{self, HttpAdd, ItemOptions, TorrentAdd, TorrentConfirm};
+use crate::engine::{self, HttpAdd, ItemOptions, MediaAdd, TorrentAdd, TorrentConfirm};
 use crate::settings::Settings;
-use crate::{assoc, bridge, debrid, guard, http, model, netif, paths, secret, settings, torrent, updater};
+use crate::{assoc, bridge, debrid, grab, guard, hf, http, media, model, netif, paths, secret, settings, tools, torrent, updater};
 
 type R<T> = Result<T, String>;
 
@@ -37,11 +37,12 @@ pub fn get_state() -> AppState {
     }
 }
 
-/// The extension files, built into Haul so portable copies have them too.
+/// The extension files, built into Haul so portable copies have them too. The Firefox copy
+/// uses its own manifest; everything else is shared.
 const EXTENSION_FILES: &[(&str, &[u8])] = &[
-    ("manifest.json", include_bytes!("../../extension/manifest.json")),
     ("background.js", include_bytes!("../../extension/background.js")),
     ("alt-click.js", include_bytes!("../../extension/alt-click.js")),
+    ("video-button.js", include_bytes!("../../extension/video-button.js")),
     ("popup.html", include_bytes!("../../extension/popup.html")),
     ("popup.js", include_bytes!("../../extension/popup.js")),
     ("icons/16.png", include_bytes!("../../extension/icons/16.png")),
@@ -49,24 +50,37 @@ const EXTENSION_FILES: &[(&str, &[u8])] = &[
     ("icons/48.png", include_bytes!("../../extension/icons/48.png")),
     ("icons/128.png", include_bytes!("../../extension/icons/128.png")),
 ];
+const MANIFEST_CHROMIUM: &[u8] = include_bytes!("../../extension/manifest.json");
+const MANIFEST_FIREFOX: &[u8] = include_bytes!("../../extension/manifest.firefox.json");
 
-fn extension_dir() -> std::path::PathBuf {
-    let p = paths::get();
-    let shipped = p.exe_dir.join("extension");
-    if shipped.join("manifest.json").is_file() {
-        return shipped;
-    }
-    // Portable (or a manual copy): unpack the built-in copy next to Haul's data.
-    let dir = p.data.join("extension");
-    for (name, bytes) in EXTENSION_FILES {
+fn unpack(dir: &std::path::Path, manifest: &[u8]) {
+    let files = EXTENSION_FILES.iter().copied().chain(std::iter::once(("manifest.json", manifest)));
+    for (name, bytes) in files {
         let f = dir.join(name);
-        if std::fs::read(&f).map(|b| b != *bytes).unwrap_or(true) {
+        if std::fs::read(&f).map(|b| b != bytes).unwrap_or(true) {
             if let Some(parent) = f.parent() {
                 let _ = std::fs::create_dir_all(parent);
             }
             let _ = std::fs::write(&f, bytes);
         }
     }
+}
+
+fn extension_dir() -> std::path::PathBuf {
+    // Installed copies ship the extension next to Haul.exe, updated with each release; keep
+    // using it so an extension loaded from there before keeps working.
+    let shipped = paths::get().exe_dir.join("extension");
+    if shipped.join("manifest.json").is_file() {
+        return shipped;
+    }
+    let dir = paths::get().data.join("extension");
+    unpack(&dir, MANIFEST_CHROMIUM);
+    dir
+}
+
+fn extension_dir_firefox() -> std::path::PathBuf {
+    let dir = paths::get().data.join("extension-firefox");
+    unpack(&dir, MANIFEST_FIREFOX);
     dir
 }
 
@@ -76,6 +90,8 @@ pub async fn set_settings(mut new: Settings) -> R<Settings> {
     let old = settings::get();
     // The API key only changes through debrid_connect / debrid_disconnect.
     new.debrid_key = old.debrid_key.clone();
+    new.hf_token = old.hf_token.clone();
+    new.schema = old.schema;
     let saved = settings::replace(new);
     if old.launch_at_startup != saved.launch_at_startup {
         assoc::set_startup(saved.launch_at_startup).map_err(|e| e.to_string())?;
@@ -104,6 +120,11 @@ pub async fn set_settings(mut new: Settings) -> R<Settings> {
                 engine::toast(format!("Torrents couldn't start: {e:#}"), "error");
             }
         });
+    }
+    if old.mini_hotkey != saved.mini_hotkey {
+        if let Err(e) = crate::register_hotkey(&saved.mini_hotkey) {
+            engine::toast(format!("That shortcut can't be used: {e}"), "error");
+        }
     }
     if old.channel != saved.channel {
         tauri::async_runtime::spawn(updater::check(false));
@@ -134,7 +155,7 @@ pub async fn inspect_url(url: String, referrer: Option<String>, cookies: Option<
         info.debrid = true;
         return Ok(info);
     }
-    http::inspect(http::Request { url, referrer: referrer.unwrap_or_default(), cookies: cookies.unwrap_or_default(), user_agent: String::new() }).await
+    http::inspect(http::Request { url, referrer: referrer.unwrap_or_default(), cookies: cookies.unwrap_or_default(), ..Default::default() }).await
 }
 
 #[tauri::command]
@@ -431,7 +452,11 @@ pub fn system_theme() -> serde_json::Value {
 }
 
 #[tauri::command]
-pub fn open_extension_folder() {
+pub fn open_extension_folder(firefox: Option<bool>) {
+    if firefox.unwrap_or(false) {
+        open_path(&extension_dir_firefox());
+        return;
+    }
     open_path(&extension_dir());
 }
 
@@ -477,9 +502,132 @@ pub fn save_window(app: AppHandle) {
     crate::save_window_state(&app);
 }
 
+// ---------------------------------------------------------------- video & music
+
+#[tauri::command]
+pub async fn media_inspect(url: String) -> R<media::MediaInfo> {
+    media::inspect(url.trim()).await
+}
+
+#[tauri::command]
+pub fn add_media(items: Vec<MediaAdd>) -> R<Vec<u64>> {
+    let mut ids = Vec::new();
+    for it in items {
+        ids.push(engine::add_media(it)?);
+    }
+    Ok(ids)
+}
+
+#[tauri::command]
+pub fn tools_state() -> tools::ToolsState {
+    tools::state()
+}
+
+/// Installs anything missing, then checks yt-dlp for a newer version.
+#[tauri::command]
+pub async fn tools_update() -> R<tools::ToolsState> {
+    tools::ensure(true).await?;
+    tools::update_ytdlp(true).await?;
+    Ok(tools::state())
+}
+
+#[tauri::command]
+pub fn tools_remove() -> tools::ToolsState {
+    tools::remove();
+    tools::state()
+}
+
+// ---------------------------------------------------------------- grabber, Hugging Face
+
+#[tauri::command]
+pub async fn grab_links(url: String) -> R<Vec<grab::Link>> {
+    grab::grab(&url).await
+}
+
+#[tauri::command]
+pub async fn hf_list(input: String) -> R<hf::Listing> {
+    hf::list(&input).await
+}
+
+#[derive(serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct HfAdd {
+    repo: hf::Repo,
+    files: Vec<hf::HfFile>,
+    /// "" = Downloads\Hugging Face\org\name
+    folder: String,
+}
+
+#[tauri::command]
+pub fn hf_add(add: HfAdd) -> R<Vec<u64>> {
+    let base = if add.folder.trim().is_empty() {
+        let dl = std::path::PathBuf::from(paths::expand_env(&settings::with(|s| s.download_dir.clone())));
+        add.repo.id.split('/').fold(dl.join("Hugging Face"), |p, part| p.join(model::sanitize(part)))
+    } else {
+        std::path::PathBuf::from(paths::expand_env(add.folder.trim()))
+    };
+    let auth = !hf::token().is_empty();
+    let mut ids = Vec::new();
+    for f in add.files {
+        let mut parts: Vec<String> = f.path.split('/').filter(|p| !p.is_empty()).map(model::sanitize).collect();
+        let name = parts.pop().unwrap_or_else(|| "file".into());
+        let dir = parts.iter().fold(base.clone(), |p, c| p.join(c));
+        let id = engine::add_http(HttpAdd {
+            url: hf::resolve_url(&add.repo, &f.path),
+            name,
+            folder: dir.to_string_lossy().to_string(),
+            category: "Hugging Face".into(),
+            sha256: f.sha256.clone(),
+            git_sha1: f.git_sha1.clone(),
+            hf_auth: auth,
+            ..Default::default()
+        })?;
+        ids.push(id);
+    }
+    Ok(ids)
+}
+
+#[tauri::command]
+pub async fn hf_connect(token: String) -> R<String> {
+    let name = hf::whoami(token.trim()).await?;
+    let sealed = secret::seal(token.trim());
+    let s = settings::update(|s| s.hf_token = sealed);
+    engine::emit("settings", s);
+    Ok(name)
+}
+
+#[tauri::command]
+pub fn hf_disconnect() -> Settings {
+    let s = settings::update(|s| s.hf_token.clear());
+    engine::emit("settings", s.clone());
+    s
+}
+
+#[tauri::command]
+pub async fn hf_status() -> R<String> {
+    let t = hf::token();
+    if t.is_empty() {
+        return Ok(String::new());
+    }
+    hf::whoami(&t).await
+}
+
 /// A download handed to Haul from the browser extension, the clipboard or the command line.
 pub async fn incoming(req: bridge::AddRequest) -> Result<(), String> {
     let url = req.url.trim().to_string();
+    // Video pages ("Download video with Haul") and HLS / DASH streams go to yt-dlp.
+    if req.media || media::is_stream(&url) {
+        if settings::with(|s| s.show_add_dialog) {
+            engine::emit("media-request", &req);
+            crate::show_main_window();
+        } else {
+            let options = settings::with(|s| s.media_defaults.clone());
+            let id = engine::add_media(MediaAdd { url, options, referrer: req.referrer.clone(), ..Default::default() })?;
+            engine::toast("Downloading video", "info");
+            engine::emit("select", id);
+        }
+        return Ok(());
+    }
     if url.starts_with("magnet:") || is_torrent_url(&url) || url.to_ascii_lowercase().ends_with(".torrent") {
         // "Ask each time": the Add window lets you pick Real-Debrid or the torrent client.
         if asks_debrid() {
@@ -557,6 +705,11 @@ pub fn handle_args(args: Vec<String>) {
     if show {
         crate::show_main_window();
     }
+}
+
+#[tauri::command]
+pub fn toggle_mini(app: AppHandle) {
+    crate::toggle_mini(&app);
 }
 
 #[tauri::command]

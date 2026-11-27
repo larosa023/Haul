@@ -7,8 +7,9 @@
 
   onMount(() => {
     const prev = document.activeElement as HTMLElement | null;
-    const first = box?.querySelector<HTMLElement>('[autofocus], input, textarea, select, button.primary');
-    first?.focus();
+    const first = box?.querySelector<HTMLElement>('[autofocus], input:not([disabled]), textarea, select, button.primary:not([disabled])');
+    // Nothing to focus yet (still loading): focus the dialog so Esc still closes it.
+    (first ?? box)?.focus();
     return () => prev?.focus?.();
   });
 

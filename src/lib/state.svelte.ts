@@ -1,5 +1,5 @@
 import { SvelteSet } from 'svelte/reactivity';
-import { api, on, type AddRequest, type Item, type Settings, type Totals, type TorrentMeta, type UpdateState } from './api';
+import { api, on, type AddRequest, type Item, type Settings, type ToolsState, type Totals, type TorrentMeta, type UpdateState } from './api';
 import { matchesFilter, matchesSearch } from './format.js';
 
 export type Filter = 'all' | 'downloading' | 'seeding' | 'completed' | 'paused' | 'errors';
@@ -9,6 +9,9 @@ type Dialog =
   | { kind: 'torrent'; meta: TorrentMeta }
   | { kind: 'remove'; ids: number[] }
   | { kind: 'limits'; ids: number[] }
+  | { kind: 'media'; url: string; referrer?: string }
+  | { kind: 'grab'; url?: string }
+  | { kind: 'hf'; input?: string }
   | null;
 
 export const app = $state({
@@ -22,6 +25,7 @@ export const app = $state({
   portable: false,
   extensionDir: '',
   dataDir: '',
+  tools: null as ToolsState | null,
 });
 
 export const ui = $state({
@@ -151,6 +155,11 @@ export function listenAll() {
     ui.view = 'list';
     ui.dialog = { kind: 'add', url: request.url, request };
   });
+  on<AddRequest>('media-request', (r) => {
+    ui.view = 'list';
+    ui.dialog = { kind: 'media', url: r.url, referrer: r.referrer };
+  });
+  on<ToolsState>('tools', (t) => (app.tools = t));
   on<{ url: string }>('clipboard-link', ({ url }) => {
     if (!ui.dialog) ui.clipboard = url;
   });

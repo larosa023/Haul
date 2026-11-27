@@ -69,6 +69,7 @@ export function matchesFilter(item, filter) {
     case 'errors': return item.status === 'error';
     case 'torrents': return item.kind === 'torrent';
     case 'direct': return item.kind === 'http';
+    case 'media': return item.kind === 'media';
     default: return true;
   }
 }
@@ -87,8 +88,11 @@ export function linkKind(text) {
   if (/^([a-z]:\\|\\\\)/i.test(t) && /\.torrent$/i.test(t)) return 'torrent';
   try {
     const u = new URL(t);
+    if (/^ftp(e?s)?:$/.test(u.protocol)) return 'http';
     if (u.protocol !== 'http:' && u.protocol !== 'https:') return null;
-    return /\.torrent$/i.test(u.pathname) ? 'torrent' : 'http';
+    if (/\.torrent$/i.test(u.pathname)) return 'torrent';
+    if (/\.(m3u8|mpd)$/i.test(u.pathname) || isMediaSite(t)) return 'media';
+    return 'http';
   } catch {
     return null;
   }
@@ -107,4 +111,101 @@ export function urlName(text) {
     const m = /[?&]dn=([^&]+)/.exec(String(text));
     return m ? decodeURIComponent(m[1].replace(/\+/g, ' ')) : String(text);
   }
+}
+
+const MEDIA_HOSTS = /(^|\.)(youtube\.com|youtu\.be|music\.youtube\.com|vimeo\.com|dailymotion\.com|twitch\.tv|tiktok\.com|twitter\.com|x\.com|instagram\.com|facebook\.com|fb\.watch|reddit\.com|v\.redd\.it|soundcloud\.com|bandcamp\.com|rumble\.com|bilibili\.com|nicovideo\.jp|streamable\.com|odysee\.com|mixcloud\.com|kick\.com|bsky\.app|threads\.net|ted\.com|archive\.org|bitchute\.com|vk\.com|9gag\.com|imgur\.com|pinterest\.com|tumblr\.com|loom\.com|wistia\.com|peertube\.[a-z]+)$/i;
+
+/** A page on a site yt-dlp knows (a video, playlist or channel, not the site's home page). */
+export function isMediaSite(text) {
+  try {
+    const u = new URL(String(text).trim());
+    if (!/^https?:$/.test(u.protocol) || !MEDIA_HOSTS.test(u.hostname.replace(/^www\.|^m\./, ''))) return false;
+    return u.pathname.length > 1 || u.search.length > 1;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Expands a batch pattern: "file[001-100].zip" (keeps zero padding), "img[1-20:2].jpg" (step),
+ * "part[a-f].rar". Several ranges multiply. Returns null if there's no pattern.
+ */
+export function expandPattern(text, cap = 5000) {
+  const s = String(text ?? '').trim();
+  const re = /\[(\d+)-(\d+)(?::(\d+))?\]|\[([a-zA-Z])-([a-zA-Z])\]/g;
+  const parts = [];
+  let last = 0;
+  let m;
+  while ((m = re.exec(s))) {
+    parts.push(s.slice(last, m.index));
+    if (m[1] != null) {
+      const a = parseInt(m[1], 10);
+      const b = parseInt(m[2], 10);
+      const step = Math.max(1, parseInt(m[3] ?? '1', 10));
+      const width = m[1].length > 1 && m[1].startsWith('0') ? m[1].length : 0;
+      const vals = [];
+      for (let i = a; a <= b ? i <= b : i >= b; i += a <= b ? step : -step) {
+        vals.push(width ? String(i).padStart(width, '0') : String(i));
+        if (vals.length > cap) break;
+      }
+      parts.push(vals);
+    } else {
+      const a = m[4].charCodeAt(0);
+      const b = m[5].charCodeAt(0);
+      const vals = [];
+      for (let i = a; a <= b ? i <= b : i >= b; i += a <= b ? 1 : -1) vals.push(String.fromCharCode(i));
+      parts.push(vals);
+    }
+    last = re.lastIndex;
+  }
+  if (!parts.length) return null;
+  parts.push(s.slice(last));
+  let out = [''];
+  for (const p of parts) {
+    if (typeof p === 'string') out = out.map((x) => x + p);
+    else {
+      const next = [];
+      for (const x of out) for (const v of p) {
+        next.push(x + v);
+        if (next.length >= cap) break;
+      }
+      out = next;
+    }
+    if (out.length >= cap) out = out.slice(0, cap);
+  }
+  return out;
+}
+
+/** Links in pasted text: one per line (or space separated), patterns expanded. */
+export function batchLinks(text, cap = 5000) {
+  const out = [];
+  const seen = new Set();
+  // One per line; a line with several links separated by spaces works too, but a lone file path
+  // with spaces in it (C:\My files\a.torrent) stays whole.
+  const toks = [];
+  for (const line of String(text ?? '').split(/\r?\n/)) {
+    const l = line.trim();
+    if (!l) continue;
+    if (linkKind(l) || !/\s/.test(l)) toks.push(l);
+    else toks.push(...l.split(/\s+/));
+  }
+  for (const tok of toks) {
+    for (const u of expandPattern(tok, cap) ?? [tok]) {
+      if (linkKind(u) && !seen.has(u)) {
+        seen.add(u);
+        out.push(u);
+      }
+      if (out.length >= cap) return out;
+    }
+  }
+  return out;
+}
+
+export function clock(secs) {
+  if (!secs || secs < 0) return '';
+  const s = Math.round(secs);
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const ss = String(s % 60).padStart(2, '0');
+  return h ? `${h}:${String(m).padStart(2, '0')}:${ss}` : `${m}:${ss}`;
 }

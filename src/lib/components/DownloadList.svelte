@@ -91,6 +91,7 @@
     if (it.note) return it.note;
     if (it.hashState === 'ok') return 'SHA-256 verified';
     if (it.kind === 'torrent' && (it.status === 'downloading' || it.status === 'seeding')) return `${it.peers} peers${it.speedUp ? ` · ↑ ${speed(it.speedUp)}` : ''}`;
+    if (it.kind === 'media') return it.media || it.category;
     return it.category || (it.kind === 'torrent' ? 'Torrent' : '');
   }
 </script>
@@ -138,7 +139,7 @@
             onkeydown={() => {}}
           >
             <span class="c-name">
-              <span class="kind" title={it.debrid ? 'Through Real-Debrid' : undefined}><Icon name={it.kind === 'debrid' || it.debrid ? 'cloud' : it.kind === 'torrent' ? 'magnet' : 'file'} size={16} /></span>
+              <span class="kind" title={it.debrid ? 'Through Real-Debrid' : undefined}><Icon name={it.kind === 'debrid' || it.debrid ? 'cloud' : it.kind === 'torrent' ? 'magnet' : it.kind === 'media' ? (it.category === 'Music' ? 'music' : 'video') : 'file'} size={16} /></span>
               <span class="names">
                 <span class="title" title={it.name}>{it.name}</span>
                 {#if !compact}<span class="subline" class:errtext={it.status === 'error'} title={sub(it)}>{sub(it)}</span>{/if}

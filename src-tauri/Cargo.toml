@@ -1,6 +1,6 @@
 [package]
 name = "haul"
-version = "0.2.0"
+version = "0.3.0"
 description = "A clean download manager and torrent client for Windows"
 edition = "2021"
 rust-version = "1.80"
@@ -16,12 +16,13 @@ tauri-build = { version = "2", features = [] }
 tauri = { version = "2", features = ["tray-icon", "image-png"] }
 tauri-plugin-opener = "2"
 tauri-plugin-dialog = "2"
+tauri-plugin-global-shortcut = "2"
 tauri-plugin-window-state = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 semver = "1"
 librqbit = { version = "9.1", default-features = false, features = ["rust-tls"] }
-tokio = { version = "1", features = ["net", "io-util", "sync", "time", "macros", "rt", "rt-multi-thread", "fs"] }
+tokio = { version = "1", features = ["net", "io-util", "sync", "time", "macros", "rt", "rt-multi-thread", "fs", "process"] }
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "stream", "json"] }
 futures-util = "0.3"
 sha2 = "0.10"
@@ -35,6 +36,13 @@ zip = { version = "2", default-features = false, features = ["deflate", "deflate
 sevenz-rust2 = { version = "0.20", default-features = false, features = ["util", "bzip2"] }
 netdev = "0.47"
 base64 = "0.22"
+sha1 = "0.10"
+suppaftp = { version = "13", default-features = false, features = ["tokio-rustls-ring", "deprecated"] }
+tokio-rustls = { version = "0.26", default-features = false, features = ["ring", "tls12"] }
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
+webpki-roots = "1"
+bytes = "1"
+tokio-util = { version = "0.7", features = ["io"] }
 
 [target.'cfg(windows)'.dependencies]
 tauri-plugin-single-instance = "2"

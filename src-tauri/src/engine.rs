@@ -208,7 +208,9 @@ async fn tick(dt: f64) {
                     }
                     it.speed_down = speed;
                     it.eta = if speed > 0 && it.size > 0 { (it.size.saturating_sub(it.done) / speed) as i64 } else { -1 };
-                    it.note = if conns > 1 { format!("{conns} connections") } else { String::new() };
+                    if it.kind == Kind::Http && !it.note.starts_with("The file changed") {
+                        it.note = if conns > 1 { format!("{conns} connections") } else { String::new() };
+                    }
                 }
             });
             if done_flag {
@@ -472,7 +474,7 @@ async fn schedule(s: &settings::Settings, engine_running: bool) {
             .iter()
             .enumerate()
             .filter(|(_, i)| !i.paused && !i.is_finished() && i.status != Status::Error && i.status != Status::Metadata)
-            .filter(|(_, i)| i.kind == Kind::Http || (i.kind == Kind::Torrent && !i.file_prio.is_empty()))
+            .filter(|(_, i)| matches!(i.kind, Kind::Http | Kind::Media) || (i.kind == Kind::Torrent && !i.file_prio.is_empty()))
             .map(|(pos, i)| (i.priority, pos, i.id, i.kind))
             .collect()
     });
@@ -489,7 +491,7 @@ async fn schedule(s: &settings::Settings, engine_running: bool) {
     for (_, _, id, kind) in &wanted {
         let should = run.contains(id) || keep.contains(id);
         match kind {
-            Kind::Http => {
+            Kind::Http | Kind::Media => {
                 let running = rt().http.contains_key(id);
                 if should && !running {
                     start_http(*id);
@@ -605,7 +607,8 @@ fn start_http(id: u64) {
         }
     });
     let c2 = ctl.clone();
-    let handle = tauri::async_runtime::spawn(async move { http::run(id, c2).await });
+    let media = model::with(|st| st.get(id).map(|i| i.kind == Kind::Media)).unwrap_or(false);
+    let handle = tauri::async_runtime::spawn(async move { if media { crate::media::run(id, c2).await } else { http::run(id, c2).await } });
     let tauri::async_runtime::JoinHandle::Tokio(handle) = handle;
     rt().http.insert(id, HttpTask { ctl, handle, last_bytes: 0 });
 }
@@ -680,6 +683,24 @@ fn after_finish(id: u64) {
             return;
         }
     }
+    // Hugging Face small files: their git blob hash.
+    if it.kind == Kind::Http && !it.git_sha1.is_empty() && it.sha256.is_empty() {
+        model::with(|st| st.get_mut(id).map(|i| i.hash_state = "checking".into()));
+        let ok = crate::hf::git_blob_sha1(&it.file_path()).map(|h| h.eq_ignore_ascii_case(&it.git_sha1)).unwrap_or(false);
+        model::with(|st| {
+            if let Some(i) = st.get_mut(id) {
+                i.hash_state = if ok { "ok".into() } else { "mismatch".into() };
+                if !ok {
+                    i.status = Status::Error;
+                    i.error = "The file doesn't match its checksum: it may be damaged".into();
+                }
+            }
+        });
+        if !ok {
+            notify::show(id, "Checksum mismatch", &it.name, false);
+            return;
+        }
+    }
     // Extract
     if s.auto_extract && !it.extracted {
         let archives: Vec<std::path::PathBuf> = if it.kind == Kind::Http {
@@ -742,13 +763,16 @@ pub struct HttpAdd {
     pub priority: i8,
     /// Get the file through Real-Debrid (decided by the caller).
     pub debrid: bool,
+    /// Hugging Face: git blob SHA-1 for small files, and whether to send the token.
+    pub git_sha1: String,
+    pub hf_auth: bool,
 }
 
 pub fn add_http(a: HttpAdd) -> Result<u64, String> {
     let url = a.url.trim().to_string();
     let parsed = url::Url::parse(&url).map_err(|_| "That doesn't look like a link".to_string())?;
-    if !matches!(parsed.scheme(), "http" | "https") {
-        return Err("Only http and https links can be downloaded directly".into());
+    if !matches!(parsed.scheme(), "http" | "https" | "ftp" | "ftps" | "ftpes") {
+        return Err("Only http, https and ftp links can be downloaded directly".into());
     }
     let sha = a.sha256.trim().to_ascii_lowercase();
     if !sha.is_empty() && (sha.len() != 64 || !sha.chars().all(|c| c.is_ascii_hexdigit())) {
@@ -770,6 +794,8 @@ pub fn add_http(a: HttpAdd) -> Result<u64, String> {
             category: a.category,
             sha256: sha,
             connections: a.connections,
+            git_sha1: a.git_sha1,
+            hf_auth: a.hf_auth,
             paused: a.paused,
             priority: a.priority,
             status: if a.paused { Status::Paused } else { Status::Queued },
@@ -780,6 +806,44 @@ pub fn add_http(a: HttpAdd) -> Result<u64, String> {
         })
     });
     Ok(id)
+}
+
+/// A video / music download (one per video; playlists add one each).
+#[derive(serde::Deserialize, Default, Clone)]
+#[serde(rename_all = "camelCase", default)]
+pub struct MediaAdd {
+    pub url: String,
+    pub title: String,
+    pub options: crate::media::MediaOptions,
+    /// "" = by the sorting rules (Video / Music).
+    pub folder: String,
+    pub referrer: String,
+    pub paused: bool,
+}
+
+pub fn add_media(a: MediaAdd) -> Result<u64, String> {
+    let url = a.url.trim().to_string();
+    if url::Url::parse(&url).is_err() {
+        return Err("That doesn't look like a link".into());
+    }
+    let title = if a.title.trim().is_empty() { http::url_name(&url).unwrap_or_else(|| url.clone()) } else { a.title.trim().to_string() };
+    Ok(model::with(|st| {
+        st.insert(Item {
+            kind: Kind::Media,
+            name: title,
+            source: url,
+            referrer: a.referrer,
+            save_dir: paths::expand_env(a.folder.trim()),
+            category: if a.options.audio() { "Music".into() } else { "Video".into() },
+            media: Some(a.options),
+            paused: a.paused,
+            status: if a.paused { Status::Paused } else { Status::Queued },
+            ratio_limit: -1.0,
+            seed_time_limit: -1,
+            eta: -1,
+            ..Default::default()
+        })
+    }))
 }
 
 #[derive(serde::Deserialize, Default, Clone)]
@@ -1226,7 +1290,7 @@ pub async fn pause(ids: Vec<u64>) {
             })
         }) else { continue };
         match it.kind {
-            Kind::Http => stop_http_wait(id).await,
+            Kind::Http | Kind::Media => stop_http_wait(id).await,
             Kind::Torrent => {
                 if let Some(h) = rt().meta.remove(&id) {
                     h.abort();
@@ -1283,7 +1347,7 @@ pub async fn remove(ids: Vec<u64>, delete_files: bool) {
             h.abort();
         }
         match it.kind {
-            Kind::Http => {
+            Kind::Http | Kind::Media => {
                 stop_http_wait(id).await;
                 http::remove_partial(&it);
                 if delete_files && it.status == Status::Completed {
@@ -1496,7 +1560,7 @@ pub fn files_of(id: u64) -> Vec<model::TorrentFile> {
 pub fn item_path(id: u64) -> Option<std::path::PathBuf> {
     let it = model::with(|st| st.get(id).cloned())?;
     match it.kind {
-        Kind::Http => {
+        Kind::Http | Kind::Media => {
             let p = it.file_path();
             if p.exists() { Some(p) } else { Some(std::path::PathBuf::from(&it.save_dir)) }
         }

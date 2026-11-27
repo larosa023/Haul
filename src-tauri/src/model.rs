@@ -15,6 +15,8 @@ pub enum Kind {
     Torrent,
     /// A torrent Real-Debrid downloads first; becomes direct download(s) when it's ready.
     Debrid,
+    /// Video or music through yt-dlp (also HLS / DASH streams).
+    Media,
 }
 
 #[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Eq, Debug, Default)]
@@ -126,6 +128,15 @@ pub struct Item {
     /// The download link was already renewed once after failing.
     pub debrid_renewed: bool,
 
+    // Video / music (yt-dlp)
+    pub media: Option<crate::media::MediaOptions>,
+
+    // Hugging Face
+    /// Git blob SHA-1 to check small (non-LFS) files against.
+    pub git_sha1: String,
+    /// Send the Hugging Face token (gated models).
+    pub hf_auth: bool,
+
     pub extracted: bool,
     pub notified: bool,
 
@@ -196,6 +207,7 @@ impl Item {
             "note": self.note,
             "fileCount": if self.kind == Kind::Torrent { self.file_prio.len() } else { 1 },
             "debrid": !self.debrid_link.is_empty() || self.kind == Kind::Debrid,
+            "media": self.media.as_ref().map(|m| m.label()).unwrap_or_default(),
         })
     }
 }

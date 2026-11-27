@@ -10,6 +10,9 @@
   import AddDialog from './lib/components/AddDialog.svelte';
   import TorrentDialog from './lib/components/TorrentDialog.svelte';
   import RemoveDialog from './lib/components/RemoveDialog.svelte';
+  import MediaDialog from './lib/components/MediaDialog.svelte';
+  import GrabDialog from './lib/components/GrabDialog.svelte';
+  import HfDialog from './lib/components/HfDialog.svelte';
   import Banners from './lib/components/Banners.svelte';
   import Toasts from './lib/components/Toasts.svelte';
   import ContextMenu from './lib/components/ContextMenu.svelte';
@@ -181,6 +184,9 @@
   {#if ui.dialog?.kind === 'add'}<AddDialog url={ui.dialog.url} request={ui.dialog.request} />{/if}
   {#if ui.dialog?.kind === 'torrent'}<TorrentDialog meta={ui.dialog.meta} />{/if}
   {#if ui.dialog?.kind === 'remove'}<RemoveDialog ids={ui.dialog.ids} />{/if}
+  {#if ui.dialog?.kind === 'media'}{#key ui.dialog.url}<MediaDialog url={ui.dialog.url} referrer={ui.dialog.referrer} />{/key}{/if}
+  {#if ui.dialog?.kind === 'grab'}<GrabDialog url={ui.dialog.url} />{/if}
+  {#if ui.dialog?.kind === 'hf'}<HfDialog input={ui.dialog.input} />{/if}
   <ContextMenu />
 {/if}
 <Toasts />

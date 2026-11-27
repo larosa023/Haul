@@ -13,8 +13,15 @@ pub fn looks_downloadable(text: &str) -> bool {
         return t.contains("xt=urn:bt");
     }
     let Ok(u) = url::Url::parse(t) else { return false };
+    if crate::ftp::is_ftp(t) {
+        return true;
+    }
     if !matches!(u.scheme(), "http" | "https") {
         return false;
+    }
+    // Video pages and streams.
+    if crate::media::is_stream(t) || (crate::media::is_media_site(t) && u.path().len() > 1) {
+        return true;
     }
     let name = crate::http::url_name(t).unwrap_or_default();
     let ext = crate::sorter::extension(&name);

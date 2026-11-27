@@ -51,18 +51,18 @@ export async function refreshSystem() {
 let lastBackdrop = '';
 
 /** Applies a theme live: CSS variables, light/dark, and the Windows backdrop. */
-export function applyTheme(settings: Pick<Settings, 'theme' | 'accent' | 'compactRows'>) {
+export function applyTheme(settings: Pick<Settings, 'theme' | 'accent' | 'compactRows'>, solid = false) {
   const chosen = findTheme(settings.theme);
   const t = effectiveTheme(chosen, themes.systemLight);
   const accent = resolveAccent(t, settings.accent, themes.systemAccent);
-  const backdropOn = isTauri && t.backdrop !== 'none' && themes.backdrop;
+  const backdropOn = !solid && isTauri && t.backdrop !== 'none' && themes.backdrop;
   const vars = cssVars(t, accent, backdropOn);
   const root = document.documentElement;
   for (const [k, v] of Object.entries(vars)) root.style.setProperty(k, v);
   root.dataset.mode = t.dark ? 'dark' : 'light';
   root.dataset.compact = String(!!settings.compactRows);
   const key = `${backdropOn ? t.backdrop : 'none'}:${t.dark}`;
-  if (isTauri && key !== lastBackdrop) {
+  if (isTauri && !solid && key !== lastBackdrop) {
     lastBackdrop = key;
     void api.setBackdrop(backdropOn ? t.backdrop : 'none', t.dark).catch(() => {});
   }

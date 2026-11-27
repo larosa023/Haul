@@ -64,7 +64,11 @@ jobs:
           New-Item -ItemType Directory -Force out | Out-Null
           Copy-Item "src-tauri/target/release/bundle/nsis/Haul_${ver}_x64-setup.exe" out/
           Copy-Item "src-tauri/target/release/haul.exe" out/Haul.exe
-          Compress-Archive -Path extension/* -DestinationPath out/Haul-extension.zip
+          New-Item -ItemType Directory -Force ext-cr, ext-ff | Out-Null
+          Copy-Item -Recurse extension/* ext-cr; Remove-Item ext-cr/manifest.firefox.json
+          Copy-Item -Recurse extension/* ext-ff; Move-Item -Force ext-ff/manifest.firefox.json ext-ff/manifest.json
+          Compress-Archive -Path ext-cr/* -DestinationPath out/Haul-extension.zip
+          Compress-Archive -Path ext-ff/* -DestinationPath out/Haul-extension-firefox.zip
           $lines = Get-ChildItem out -File | ForEach-Object { "{0}  {1}" -f (Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLower(), $_.Name }
           [IO.File]::WriteAllText("$PWD/out/SHA256SUMS.txt", ($lines -join "`n") + "`n")
           Get-Content out/SHA256SUMS.txt
@@ -164,3 +168,27 @@ jobs:
         env:
           HAUL_TEST_TORRENT: '1'
         run: cargo test --lib real_torrent -- --nocapture --test-threads=1
+
+  net-test:
+    # Real network: installs yt-dlp + ffmpeg (SHA-256 checked), downloads and joins an HLS stream,
+    # and downloads over FTP and FTPS with resume.
+    runs-on: windows-latest
+    timeout-minutes: 30
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npm run build
+      - name: Video tools, HLS, FTP
+        working-directory: src-tauri
+        env:
+          HAUL_TEST_NET: '1'
+        run: cargo test --lib real_ -- --nocapture --test-threads=1 --skip real_torrent

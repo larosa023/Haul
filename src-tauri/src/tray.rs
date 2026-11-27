@@ -13,10 +13,13 @@ pub fn create(app: &AppHandle) -> tauri::Result<()> {
     let add = MenuItem::with_id(app, "add", "New download…", true, None::<&str>)?;
     let pause = MenuItem::with_id(app, "pause_all", "Pause all", true, None::<&str>)?;
     let resume = MenuItem::with_id(app, "resume_all", "Resume all", true, None::<&str>)?;
+    let hk = crate::settings::with(|s| s.mini_hotkey.clone());
+    let mini_label = if hk.trim().is_empty() { "Mini window".to_string() } else { format!("Mini window\t{hk}") };
+    let mini = MenuItem::with_id(app, "mini", mini_label, true, None::<&str>)?;
     let alt = CheckMenuItem::with_id(app, "alt", "Limit speed", true, crate::settings::with(|s| s.alt_enabled), None::<&str>)?;
     let quit = MenuItem::with_id(app, "quit", "Quit Haul", true, None::<&str>)?;
     let sep = || PredefinedMenuItem::separator(app);
-    let menu = Menu::with_items(app, &[&show, &add, &sep()?, &pause, &resume, &alt, &sep()?, &quit])?;
+    let menu = Menu::with_items(app, &[&show, &add, &mini, &sep()?, &pause, &resume, &alt, &sep()?, &quit])?;
     let _ = ALT.set(alt);
 
     let tray = TrayIconBuilder::with_id("haul")
@@ -45,6 +48,7 @@ pub fn create(app: &AppHandle) -> tauri::Result<()> {
                 set_alt(s.alt_enabled);
                 crate::engine::emit("settings", s);
             }
+            "mini" => crate::toggle_mini(app),
             "quit" => crate::quit(app.clone()),
             _ => {}
         })

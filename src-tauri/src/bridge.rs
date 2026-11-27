@@ -19,6 +19,8 @@ pub struct AddRequest {
     pub cookies: String,
     pub user_agent: String,
     pub file_size: u64,
+    /// "Download video with Haul": look the page up with yt-dlp.
+    pub media: bool,
 }
 
 pub async fn serve() {

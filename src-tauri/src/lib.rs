@@ -6,15 +6,20 @@ mod debrid;
 mod secret;
 mod engine;
 mod extract;
+mod ftp;
+mod grab;
 mod guard;
+mod hf;
 mod http;
 mod limiter;
+mod media;
 mod model;
 mod netif;
 mod notify;
 mod paths;
 mod settings;
 mod sorter;
+mod tools;
 mod torrent;
 mod tray;
 mod updater;
@@ -67,6 +72,78 @@ pub fn save_window_state(app: &AppHandle) {
     });
 }
 
+/// The small always-on-top window with active downloads. Made when shown and destroyed when
+/// hidden, so it costs nothing while it's not on screen.
+pub fn toggle_mini(app: &AppHandle) {
+    if let Some(w) = app.get_webview_window("mini") {
+        save_mini_position(&w);
+        let _ = w.destroy();
+        return;
+    }
+    let s = settings::get();
+    let (w, h) = (316.0, 300.0);
+    let mut b = WebviewWindowBuilder::new(app, "mini", WebviewUrl::default())
+        .title("Haul")
+        .inner_size(w, h)
+        .resizable(false)
+        .decorations(false)
+        .transparent(true)
+        .always_on_top(true)
+        .skip_taskbar(true)
+        .shadow(false)
+        .visible(false);
+    if s.mini_saved {
+        b = b.position(s.mini_x as f64, s.mini_y as f64);
+    } else if let Ok(Some(m)) = app.primary_monitor() {
+        // Bottom-right, above the taskbar.
+        let scale = m.scale_factor();
+        let area = m.work_area();
+        let x = (area.position.x as f64 + area.size.width as f64) / scale - w - 16.0;
+        let y = (area.position.y as f64 + area.size.height as f64) / scale - h - 16.0;
+        b = b.position(x, y);
+    }
+    if paths::get().portable {
+        b = b.data_directory(paths::get().webview());
+    }
+    match b.build() {
+        Ok(win) => {
+            let w2 = win.clone();
+            win.on_window_event(move |e| {
+                if let tauri::WindowEvent::Moved(_) = e {
+                    save_mini_position(&w2);
+                }
+            });
+        }
+        Err(e) => paths::log(format!("mini window: {e}")),
+    }
+}
+
+fn save_mini_position(w: &tauri::WebviewWindow) {
+    let scale = w.scale_factor().unwrap_or(1.0);
+    if let Ok(p) = w.outer_position() {
+        let (x, y) = ((p.x as f64 / scale) as i32, (p.y as f64 / scale) as i32);
+        if settings::with(|s| s.mini_x != x || s.mini_y != y || !s.mini_saved) {
+            settings::update(|s| {
+                s.mini_x = x;
+                s.mini_y = y;
+                s.mini_saved = true;
+            });
+        }
+    }
+}
+
+/// (Re)binds the mini window's global shortcut.
+pub fn register_hotkey(keys: &str) -> Result<(), String> {
+    use tauri_plugin_global_shortcut::GlobalShortcutExt;
+    let Some(app) = engine::app() else { return Ok(()) };
+    let gs = app.global_shortcut();
+    let _ = gs.unregister_all();
+    if keys.trim().is_empty() {
+        return Ok(());
+    }
+    gs.register(keys.trim()).map_err(|e| e.to_string())
+}
+
 pub fn quit(app: AppHandle) {
     save_window_state(&app);
     tauri::async_runtime::spawn(async move {
@@ -77,8 +154,8 @@ pub fn quit(app: AppHandle) {
 
 /// Mica / Acrylic behind the window, matching the theme (Windows 11).
 #[tauri::command]
-fn set_backdrop(app: AppHandle, kind: String, dark: bool) {
-    let Some(w) = app.get_webview_window("main") else { return };
+fn set_backdrop(window: tauri::WebviewWindow, kind: String, dark: bool) {
+    let w = window;
     let _ = w.set_theme(Some(if dark { tauri::Theme::Dark } else { tauri::Theme::Light }));
     #[cfg(windows)]
     {
@@ -118,6 +195,15 @@ pub fn run() {
             }
             commands::handle_args(argv);
         }))
+        .plugin(
+            tauri_plugin_global_shortcut::Builder::new()
+                .with_handler(|app, _shortcut, event| {
+                    if event.state() == tauri_plugin_global_shortcut::ShortcutState::Pressed {
+                        toggle_mini(app);
+                    }
+                })
+                .build(),
+        )
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .setup(move |app| {
@@ -194,6 +280,10 @@ pub fn run() {
             tauri::async_runtime::spawn(bridge::serve());
             tauri::async_runtime::spawn(clipboard::watch());
             tauri::async_runtime::spawn(updater::background());
+            tauri::async_runtime::spawn(tools::background());
+            if let Err(e) = register_hotkey(&s.mini_hotkey) {
+                paths::log(format!("mini window shortcut {}: {e}", s.mini_hotkey));
+            }
             commands::handle_args(std::env::args().collect());
             Ok(())
         })
@@ -242,6 +332,18 @@ pub fn run() {
             commands::quit_app,
             commands::save_window,
             commands::show_window,
+            commands::toggle_mini,
+            commands::media_inspect,
+            commands::add_media,
+            commands::tools_state,
+            commands::tools_update,
+            commands::tools_remove,
+            commands::grab_links,
+            commands::hf_list,
+            commands::hf_add,
+            commands::hf_connect,
+            commands::hf_disconnect,
+            commands::hf_status,
             ui_ready,
             set_backdrop,
             set_native_frame,
@@ -265,7 +367,11 @@ static START_HIDDEN: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBo
 
 /// The UI finished its first paint: show the window (unless starting in the tray).
 #[tauri::command]
-fn ui_ready(app: AppHandle) {
+fn ui_ready(app: AppHandle, window: tauri::WebviewWindow) {
+    if window.label() == "mini" {
+        let _ = window.show();
+        return;
+    }
     commands::app_ready();
     if !START_HIDDEN.load(std::sync::atomic::Ordering::Relaxed) {
         if let Some(w) = app.get_webview_window("main") {

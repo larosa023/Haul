@@ -107,7 +107,7 @@
           {#if it.error}<span class="k">Problem</span><span class="v err">{it.error}</span>{/if}
           <span class="k">Saved to</span>
           <span class="v path">
-            <span title={it.saveDir}>{it.saveDir || 'Picked when it starts'}{it.fileName && it.kind === 'http' ? `\\${it.fileName}` : ''}</span>
+            <span title={it.saveDir}>{it.saveDir || 'Picked when it starts'}{it.fileName && (it.kind === 'http' || it.kind === 'media') ? `\\${it.fileName}` : ''}</span>
             {#if it.saveDir}<button class="btn sm ghost" onclick={() => api.reveal(it.id)}><Icon name="folder" size={14} />Show</button>{/if}
           </span>
           <span class="k">Size</span><span class="v">{it.size ? bytes(it.size) : 'Unknown'} · {bytes(it.done)} done ({percent(it.done, it.size).toFixed(1)}%)</span>
@@ -115,6 +115,9 @@
             <span class="k">Shared</span><span class="v">{bytes(it.uploaded)} · ratio {ratio(it)}{it.seedingSecs ? ` · seeded ${duration(it.seedingSecs)}` : ''}</span>
             <span class="k">Peers</span><span class="v">{it.peers}</span>
             <span class="k">Info hash</span><span class="v mono copyable"><span>{it.infoHash}</span><button class="icon-btn small" title="Copy magnet link" onclick={() => copy(`magnet:?xt=urn:btih:${it.infoHash}&dn=${encodeURIComponent(it.name)}`)}><Icon name="copy" size={13} /></button></span>
+          {:else if it.kind === 'media'}
+            <span class="k">Link</span><span class="v copyable"><span class="url" title={it.source}>{it.source}</span><button class="icon-btn small" title="Copy link" onclick={() => copy(it.source)}><Icon name="copy" size={13} /></button></span>
+            <span class="k">Format</span><span class="v">{it.media || '—'} · downloaded with yt-dlp{it.size ? '' : ' (size known once it starts)'}</span>
           {:else if it.kind === 'debrid'}
             <span class="k">Real-Debrid</span><span class="v">{it.note || 'Waiting for Real-Debrid'}. When it’s done, the files download here at full speed.</span>
           {:else}
@@ -211,7 +214,7 @@
             <label class="opt">
               <span>Connections</span>
               <span class="num"><input class="input" type="number" min="0" max="32" value={one.connections} onchange={(e) => setOpt({ connections: Number((e.currentTarget as HTMLInputElement).value) || 0 })} /></span>
-              <small class="faint">0 = default ({app.settings?.connections}). Applies when it next starts.</small>
+              <small class="faint">0 = default ({app.settings?.connections ? app.settings.connections : 'Auto, by file size'}). Applies when it next starts.</small>
             </label>
             {#if it}
               <label class="opt wide">

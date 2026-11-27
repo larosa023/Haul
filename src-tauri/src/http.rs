@@ -75,7 +75,15 @@ pub struct Request {
     pub referrer: String,
     pub cookies: String,
     pub user_agent: String,
+    /// Bearer token, sent only to huggingface.co (gated Hugging Face models).
+    pub bearer: String,
+    /// ETag or Last-Modified of the file we started: a range request then only returns part of
+    /// that exact file, and the server sends the whole (new) file if it changed.
+    pub if_range: String,
 }
+
+/// The bytes of one part of a download (HTTP response body or FTP transfer).
+pub type ByteStream = std::pin::Pin<Box<dyn futures_util::Stream<Item = Result<bytes::Bytes, Fail>> + Send>>;
 
 fn headers(req: &Request) -> HeaderMap {
     let mut h = HeaderMap::new();
@@ -100,6 +108,14 @@ fn headers(req: &Request) -> HeaderMap {
         }
     }
     h.insert(header::ACCEPT_ENCODING, HeaderValue::from_static("identity"));
+    if !req.bearer.is_empty() {
+        let host = url::Url::parse(&req.url).ok().and_then(|u| u.host_str().map(str::to_string)).unwrap_or_default();
+        if host == "huggingface.co" || host.ends_with(".huggingface.co") {
+            if let Ok(v) = HeaderValue::from_str(&format!("Bearer {}", req.bearer)) {
+                h.insert(header::AUTHORIZATION, v);
+            }
+        }
+    }
     h
 }
 
@@ -116,12 +132,16 @@ pub struct ProbeInfo {
     pub folder: String,
     /// The file comes through Real-Debrid.
     pub debrid: bool,
+    /// The link is a web page (HTML), not a file: offer to find videos or grab its links.
+    pub page: bool,
+    /// The link is a stream playlist (HLS .m3u8 / DASH .mpd).
+    pub stream: bool,
 }
 
 struct Probe {
     info: ProbeInfo,
-    /// The response, positioned at `from`, when the server honoured the range.
-    response: Option<reqwest::Response>,
+    /// The data, positioned at `from`, when the server honoured the range.
+    response: Option<ByteStream>,
 }
 
 #[derive(Debug)]
@@ -130,13 +150,29 @@ pub enum Fail {
     Temporary(String),
     /// Won't fix itself (404, 403, disk full…).
     Permanent(String),
+    /// The file on the server isn't the one we started (new ETag / date / size).
+    Changed,
 }
 
 impl Fail {
     pub fn text(&self) -> &str {
         match self {
             Fail::Temporary(s) | Fail::Permanent(s) => s,
+            Fail::Changed => "The file changed on the server",
         }
+    }
+}
+
+/// Connections for a file of this size when set to Auto: small files don't need many.
+pub fn auto_connections(size: u64) -> u32 {
+    const MB: u64 = 1024 * 1024;
+    match size {
+        0 => 8,
+        s if s < 4 * MB => 1,
+        s if s < 32 * MB => 4,
+        s if s < 256 * MB => 8,
+        s if s < 2048 * MB => 16,
+        _ => 24,
     }
 }
 
@@ -204,20 +240,26 @@ fn content_range_total(v: &str) -> Option<u64> {
 }
 
 async fn probe(req: &Request, from: u64, end: Option<u64>) -> Result<Probe, Fail> {
+    if crate::ftp::is_ftp(&req.url) {
+        let (info, response) = crate::ftp::probe(&req.url, from, true).await?;
+        return Ok(Probe { info, response });
+    }
     let range = match end {
         Some(e) => format!("bytes={from}-{}", e.saturating_sub(1)),
         None => format!("bytes={from}-"),
     };
-    let resp = client()
-        .get(&req.url)
-        .headers(headers(req))
-        .header(header::RANGE, range)
-        .send()
-        .await
-        .map_err(net_fail)?;
+    let mut rq = client().get(&req.url).headers(headers(req)).header(header::RANGE, range);
+    if from > 0 && !req.if_range.is_empty() {
+        rq = rq.header(header::IF_RANGE, &req.if_range);
+    }
+    let resp = rq.send().await.map_err(net_fail)?;
     let status = resp.status();
     if !status.is_success() {
         return Err(status_fail(status));
+    }
+    // We asked for the middle of a known file and got the whole thing: it changed.
+    if from > 0 && !req.if_range.is_empty() && status == reqwest::StatusCode::OK {
+        return Err(Fail::Changed);
     }
     let h = resp.headers();
     let get = |k: header::HeaderName| h.get(k).and_then(|v| v.to_str().ok()).unwrap_or("").to_string();
@@ -235,9 +277,17 @@ async fn probe(req: &Request, from: u64, end: Option<u64>) -> Result<Probe, Fail
         .or_else(|| url_name(&req.url))
         .unwrap_or_else(|| "download".into());
     let mut name = model::sanitize(&name);
+    let ct_full = get(header::CONTENT_TYPE).to_ascii_lowercase();
+    let ct_main = ct_full.split(';').next().unwrap_or("").trim().to_string();
+    let page = ct_main == "text/html" || ct_main == "application/xhtml+xml";
+    let lower_url = final_url.to_ascii_lowercase();
+    let path_only = lower_url.split(['?', '#']).next().unwrap_or("");
+    let stream = path_only.ends_with(".m3u8")
+        || path_only.ends_with(".mpd")
+        || matches!(ct_main.as_str(), "application/vnd.apple.mpegurl" | "application/x-mpegurl" | "audio/mpegurl" | "application/dash+xml");
     // No extension but a clear content type: add one, so sorting works.
     if sorter::extension(&name).is_empty() {
-        let ct = get(header::CONTENT_TYPE).to_ascii_lowercase();
+        let ct = ct_full.clone();
         let ext = match ct.split(';').next().unwrap_or("").trim() {
             "application/zip" => "zip",
             "application/pdf" => "pdf",
@@ -258,15 +308,21 @@ async fn probe(req: &Request, from: u64, end: Option<u64>) -> Result<Probe, Fail
     let s = settings::get();
     let category = sorter::categorize(&s.rules, &name, size, &final_url);
     let folder = sorter::folder_for(&s, &category).to_string_lossy().to_string();
-    let response = (ranged || from == 0).then_some(resp);
+    let response: Option<ByteStream> = (ranged || from == 0).then(|| {
+        use futures_util::StreamExt;
+        resp.bytes_stream().map(|r| r.map_err(net_fail)).boxed()
+    });
     Ok(Probe {
-        info: ProbeInfo { name, size, resumable, final_url, etag, last_modified, category, folder, debrid: false },
+        info: ProbeInfo { name, size, resumable, final_url, etag, last_modified, category, folder, debrid: false, page, stream },
         response,
     })
 }
 
 /// For the Add dialog: what the link is (name, size, where it would go).
 pub async fn inspect(req: Request) -> Result<ProbeInfo, String> {
+    if crate::ftp::is_ftp(&req.url) {
+        return crate::ftp::probe(&req.url, 0, false).await.map(|(i, _)| i).map_err(|e| e.text().to_string());
+    }
     match probe(&req, 0, None).await {
         Ok(p) => Ok(p.info),
         Err(e) => Err(e.text().to_string()),
@@ -340,6 +396,15 @@ struct Job {
     max_retries: u32,
 }
 
+/// An If-Range value: a strong ETag, else the Last-Modified date (weak ETags can't be used).
+pub fn strong_validator(etag: &str, last_modified: &str) -> String {
+    let e = etag.trim();
+    if !e.is_empty() && !e.starts_with("W/") {
+        return e.to_string();
+    }
+    last_modified.trim().to_string()
+}
+
 /// Plans the ranges for a file of `size` bytes and `conns` connections.
 pub fn plan(size: u64, conns: u32) -> Vec<Segment> {
     let n = ((size / MIN_SPLIT).max(1)).min(conns.max(1) as u64);
@@ -369,6 +434,36 @@ pub fn split_largest(segs: &mut Vec<Segment>) -> Option<usize> {
 
 /// Runs one download until it completes, fails or is stopped. Errors are returned as text.
 pub async fn run(id: u64, ctl: Arc<Control>) -> Result<(), Fail> {
+    // If the file changes on the server mid-way, start it over cleanly (once) instead of
+    // stitching two different files together.
+    match run_once(id, ctl.clone()).await {
+        Err(Fail::Changed) => {
+            restart_clean(id);
+            ctl.downloaded.store(0, Ordering::Relaxed);
+            ctl.segments.lock().clear();
+            match run_once(id, ctl).await {
+                Err(Fail::Changed) => Err(Fail::Temporary("The file keeps changing on the server".into())),
+                other => other,
+            }
+        }
+        other => other,
+    }
+}
+
+/// Forget progress (the partial file is overwritten from the start).
+fn restart_clean(id: u64) {
+    model::with(|st| {
+        if let Some(it) = st.get_mut(id) {
+            it.segments.clear();
+            it.done = 0;
+            it.etag.clear();
+            it.last_modified.clear();
+            it.note = "The file changed on the server, so it started over".into();
+        }
+    });
+}
+
+async fn run_once(id: u64, ctl: Arc<Control>) -> Result<(), Fail> {
     let Some(mut item) = model::with(|s| s.get(id).cloned()) else { return Ok(()) };
     // Real-Debrid links: get (or renew) the direct download link first.
     if item.source.is_empty() && !item.debrid_link.is_empty() {
@@ -383,16 +478,18 @@ pub async fn run(id: u64, ctl: Arc<Control>) -> Result<(), Fail> {
         item.source = u.download;
     }
     let s = settings::get();
-    let req = Request {
+    let mut req = Request {
         url: item.source.clone(),
         referrer: item.referrer.clone(),
         cookies: item.cookies.clone(),
         user_agent: item.user_agent.clone(),
+        bearer: if item.hf_auth { crate::hf::token() } else { String::new() },
+        if_range: String::new(),
     };
-    let conns = if item.connections > 0 { item.connections } else { s.connections }.clamp(1, 32);
+    let is_ftp = crate::ftp::is_ftp(&req.url);
 
     let mut segments = item.segments.clone();
-    let mut first_response: Option<reqwest::Response> = None;
+    let mut first_response: Option<ByteStream> = None;
     let fresh = segments.is_empty() || item.file_name.is_empty();
     if fresh {
         segments.clear();
@@ -405,13 +502,29 @@ pub async fn run(id: u64, ctl: Arc<Control>) -> Result<(), Fail> {
         let first = segments.iter().find(|s| s.remaining() > 0).cloned();
         if let Some(seg) = first {
             let end = if size > 0 && resumable { Some(seg.end) } else { None };
-            let p = probe(&req, seg.start + seg.done, end).await?;
-            let changed = (!item.etag.is_empty() && !p.info.etag.is_empty() && p.info.etag != item.etag)
-                || (size > 0 && p.info.size > 0 && p.info.size != size && p.info.resumable)
-                || !p.info.resumable;
+            // Check before resuming: same ETag, same date, same size. Otherwise start over
+            // cleanly rather than making a file that's half old, half new.
+            req.if_range = strong_validator(&item.etag, &item.last_modified);
+            let p = match probe(&req, seg.start + seg.done, end).await {
+                Err(Fail::Changed) => None,
+                other => Some(other?),
+            };
+            let changed = match &p {
+                None => true,
+                Some(p) => {
+                    (!item.etag.is_empty() && !p.info.etag.is_empty() && p.info.etag != item.etag)
+                        || (!item.last_modified.is_empty() && !p.info.last_modified.is_empty() && p.info.last_modified != item.last_modified)
+                        || (size > 0 && p.info.size > 0 && p.info.size != size && p.info.resumable)
+                        || !p.info.resumable
+                }
+            };
             if changed || !resumable {
+                if changed && resumable {
+                    restart_clean(id);
+                }
                 segments.clear(); // start over
-            } else {
+                req.if_range.clear();
+            } else if let Some(p) = p {
                 first_response = p.response;
             }
         }
@@ -450,6 +563,15 @@ pub async fn run(id: u64, ctl: Arc<Control>) -> Result<(), Fail> {
             (dir, it.file_name.clone())
         });
         let _ = std::fs::create_dir_all(&dir);
+        let conns = if item.connections > 0 {
+            item.connections
+        } else if s.connections > 0 {
+            s.connections
+        } else {
+            auto_connections(size)
+        };
+        // FTP servers often allow only a few connections per user.
+        let conns = if is_ftp { conns.clamp(1, 4) } else { conns.clamp(1, 32) };
         segments = if resumable { plan(size, conns) } else { vec![Segment { start: 0, end: if size > 0 { size } else { u64::MAX }, done: 0 }] };
         let path = part_path(&dir.join(&name));
         let f = std::fs::OpenOptions::new().create(true).write(true).truncate(true).open(&path).map_err(disk_fail)?;
@@ -470,6 +592,8 @@ pub async fn run(id: u64, ctl: Arc<Control>) -> Result<(), Fail> {
         }
     });
 
+    // Every part must come from this exact file (see Request::if_range).
+    req.if_range = model::with(|st| st.get(id).map(|i| strong_validator(&i.etag, &i.last_modified))).unwrap_or_default();
     let job = Arc::new(Job { req, file: Arc::new(file), ctl: ctl.clone(), resumable, max_retries: s.max_retries });
 
     // One worker per unfinished range; the first reuses the probe's response.
@@ -539,14 +663,14 @@ pub async fn run(id: u64, ctl: Arc<Control>) -> Result<(), Fail> {
     Ok(())
 }
 
-async fn worker(job: Arc<Job>, mut idx: usize, mut resp: Option<reqwest::Response>) -> Result<(), Fail> {
+async fn worker(job: Arc<Job>, mut idx: usize, mut resp: Option<ByteStream>) -> Result<(), Fail> {
     job.ctl.connections.fetch_add(1, Ordering::Relaxed);
     let r = worker_inner(&job, &mut idx, &mut resp).await;
     job.ctl.connections.fetch_sub(1, Ordering::Relaxed);
     r
 }
 
-async fn worker_inner(job: &Arc<Job>, idx: &mut usize, resp: &mut Option<reqwest::Response>) -> Result<(), Fail> {
+async fn worker_inner(job: &Arc<Job>, idx: &mut usize, resp: &mut Option<ByteStream>) -> Result<(), Fail> {
     let mut failures = 0u32;
     loop {
         if job.ctl.stopped() {
@@ -595,7 +719,6 @@ async fn worker_inner(job: &Arc<Job>, idx: &mut usize, resp: &mut Option<reqwest
                         failures = 0;
                     }
                 }
-                Err(Fail::Permanent(e)) => return Err(Fail::Permanent(e)),
                 Err(Fail::Temporary(e)) => {
                     failures += 1;
                     if failures > job.max_retries {
@@ -608,8 +731,8 @@ async fn worker_inner(job: &Arc<Job>, idx: &mut usize, resp: &mut Option<reqwest
                     }
                     backoff(job, failures).await;
                 }
+                Err(other) => return Err(other),
             },
-            Err(Fail::Permanent(e)) => return Err(Fail::Permanent(e)),
             Err(Fail::Temporary(e)) => {
                 failures += 1;
                 if failures > job.max_retries {
@@ -617,6 +740,7 @@ async fn worker_inner(job: &Arc<Job>, idx: &mut usize, resp: &mut Option<reqwest
                 }
                 backoff(job, failures).await;
             }
+            Err(other) => return Err(other),
         }
     }
 }
@@ -632,8 +756,7 @@ async fn backoff(job: &Arc<Job>, failures: u32) {
 }
 
 /// Streams one response into its range. Ok(true) if any bytes arrived.
-async fn pump(job: &Arc<Job>, idx: usize, resp: reqwest::Response) -> Result<bool, Fail> {
-    let mut stream = resp.bytes_stream();
+async fn pump(job: &Arc<Job>, idx: usize, mut stream: ByteStream) -> Result<bool, Fail> {
     let mut progressed = false;
     loop {
         if job.ctl.stopped() {
@@ -655,7 +778,7 @@ async fn pump(job: &Arc<Job>, idx: usize, resp: reqwest::Response) -> Result<boo
                 }
                 return Err(Fail::Temporary("The server closed the connection early".into()));
             }
-            Ok(Some(Err(e))) => return Err(net_fail(e)),
+            Ok(Some(Err(e))) => return Err(e),
             Ok(Some(Ok(c))) => c,
         };
         let n = chunk.len() as u64;
@@ -755,19 +878,26 @@ mod e2e {
 
     /// A tiny HTTP server with Range support that drops some connections midway.
     async fn serve(data: Arc<Vec<u8>>, flaky: bool) -> u16 {
+        serve_versions(Arc::new(parking_lot::Mutex::new((data, "\"v1\"".to_string()))), flaky).await
+    }
+
+    /// Like `serve`, but the file (and its ETag) can be swapped, and If-Range is honoured.
+    async fn serve_versions(current: Arc<parking_lot::Mutex<(Arc<Vec<u8>>, String)>>, flaky: bool) -> u16 {
         let l = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let port = l.local_addr().unwrap().port();
         let counter = Arc::new(AtomicU64::new(0));
         tokio::spawn(async move {
             loop {
                 let (mut s, _) = l.accept().await.unwrap();
-                let data = data.clone();
+                let (data, etag) = current.lock().clone();
                 let counter = counter.clone();
                 tokio::spawn(async move {
                     let mut buf = vec![0u8; 4096];
                     let n = s.read(&mut buf).await.unwrap_or(0);
                     let req = String::from_utf8_lossy(&buf[..n]).to_string();
                     let len = data.len() as u64;
+                    let if_range = req.lines().find_map(|l| l.to_ascii_lowercase().strip_prefix("if-range: ").map(|v| v.trim().to_string()));
+                    let stale = if_range.map(|v| v != etag.to_ascii_lowercase()).unwrap_or(false);
                     let (start, end) = req
                         .lines()
                         .find_map(|l| l.to_ascii_lowercase().strip_prefix("range: bytes=").map(|r| r.to_string()))
@@ -778,13 +908,19 @@ mod e2e {
                             (a, b.min(len - 1) + 1)
                         })
                         .unwrap_or((0, len));
-                    let head = format!(
-                        "HTTP/1.1 206 Partial Content\r\nContent-Length: {}\r\nContent-Range: bytes {}-{}/{}\r\nAccept-Ranges: bytes\r\nETag: \"v1\"\r\nContent-Disposition: attachment; filename=\"test file.bin\"\r\nConnection: close\r\n\r\n",
-                        end - start,
-                        start,
-                        end - 1,
-                        len
-                    );
+                    // If-Range didn't match: the whole (new) file, as a 200.
+                    let (start, end) = if stale { (0, len) } else { (start, end) };
+                    let head = if stale {
+                        format!("HTTP/1.1 200 OK\r\nContent-Length: {len}\r\nAccept-Ranges: bytes\r\nETag: {etag}\r\nContent-Disposition: attachment; filename=\"test file.bin\"\r\nConnection: close\r\n\r\n")
+                    } else {
+                        format!(
+                            "HTTP/1.1 206 Partial Content\r\nContent-Length: {}\r\nContent-Range: bytes {}-{}/{}\r\nAccept-Ranges: bytes\r\nETag: {etag}\r\nContent-Disposition: attachment; filename=\"test file.bin\"\r\nConnection: close\r\n\r\n",
+                            end - start,
+                            start,
+                            end - 1,
+                            len
+                        )
+                    };
                     if s.write_all(head.as_bytes()).await.is_err() {
                         return;
                     }
@@ -862,5 +998,38 @@ mod e2e {
         assert_eq!(sha(&got), sha(&d));
         assert!(!out.join("test file.bin.haul").exists());
         assert_eq!(sha256_file(&out.join("test file.bin")).unwrap(), sha(&d));
+    }
+
+    /// Paused, then the file changed on the server: resuming must start over, not mix files.
+    #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+    async fn resume_after_server_file_changed() {
+        let dir = setup();
+        let out = dir.join("changed");
+        let v1 = data(12 * 1024 * 1024);
+        let v2: Arc<Vec<u8>> = Arc::new(v1.iter().map(|b| b.wrapping_add(7)).collect());
+        let current = Arc::new(parking_lot::Mutex::new((v1.clone(), "\"v1\"".to_string())));
+        let port = serve_versions(current.clone(), false).await;
+        let id = model::with(|s| {
+            s.insert(model::Item { source: format!("http://127.0.0.1:{port}/f"), save_dir: out.to_string_lossy().to_string(), file_name: "changed.bin".into(), connections: 6, ..Default::default() })
+        });
+        let ctl = Control::new();
+        ctl.limiter.set_rate(4 * 1024 * 1024); // slow enough to pause it partway
+        let c2 = ctl.clone();
+        let h = tokio::spawn(async move { run(id, c2).await });
+        tokio::time::sleep(Duration::from_millis(700)).await;
+        ctl.stop.store(true, Ordering::Relaxed);
+        h.await.unwrap().unwrap();
+        let partial = model::with(|s| s.get(id).cloned()).unwrap();
+        assert!(partial.done > 0 && partial.done < v1.len() as u64, "done {}", partial.done);
+        assert_eq!(partial.etag, "\"v1\"");
+
+        // The server now has a different file.
+        *current.lock() = (v2.clone(), "\"v2\"".to_string());
+        run(id, Control::new()).await.unwrap();
+        let got = std::fs::read(out.join("changed.bin")).unwrap();
+        assert_eq!(sha(&got), sha(&v2), "must be the new file, not a mix");
+        let it = model::with(|s| s.get(id).cloned()).unwrap();
+        assert_eq!(it.etag, "\"v2\"");
+        assert!(it.note.contains("changed"), "note: {}", it.note);
     }
 }

@@ -3,7 +3,7 @@
   import Icon from '../lib/components/Icon.svelte';
   import SettingRow from '../lib/components/SettingRow.svelte';
   import Switch from '../lib/components/Switch.svelte';
-  import { api, isTauri, type Adapter, type DebridState, type Rule, type Settings } from '../lib/api';
+  import { api, isTauri, type Adapter, type DebridState, type MediaOptions, type Rule, type Settings } from '../lib/api';
   import { app, ui, saveSettings, toast, errorText } from '../lib/state.svelte';
   import { THEMES, ACCENT_SWATCHES, cssVars, effectiveTheme, resolveAccent, themeToJson, type ThemeDef } from '../lib/themecore.js';
   import { themes, allThemes, reloadThemes, findTheme } from '../lib/theme.svelte';
@@ -11,12 +11,13 @@
   const SECTIONS = [
     { id: 'general', label: 'General', icon: 'settings', blurb: 'Startup, the tray and new downloads' },
     { id: 'downloads', label: 'Downloads', icon: 'download', blurb: 'Folders, connections and the queue' },
+    { id: 'media', label: 'Video & music', icon: 'video', blurb: 'YouTube and 1,800+ other sites, with yt-dlp' },
     { id: 'sorting', label: 'Sorting', icon: 'sort', blurb: 'Where finished files go, and extracting archives' },
     { id: 'speed', label: 'Speed & schedule', icon: 'gauge', blurb: 'Limits, and slower speeds at set times' },
     { id: 'torrents', label: 'Torrents', icon: 'magnet', blurb: 'Seeding, peers, privacy and ports' },
     { id: 'network', label: 'Network adapter', icon: 'network', blurb: 'Keep torrents on your VPN' },
     { id: 'debrid', label: 'Debrid', icon: 'cloud', blurb: 'Real-Debrid for file hosters and torrents' },
-    { id: 'browser', label: 'Browser', icon: 'puzzle', blurb: 'Send downloads from Chrome, Edge or Drift' },
+    { id: 'browser', label: 'Browser', icon: 'puzzle', blurb: 'Send downloads from Chrome, Edge, Drift or Firefox' },
     { id: 'appearance', label: 'Appearance', icon: 'brush', blurb: 'Themes, accent color and layout' },
     { id: 'about', label: 'About & updates', icon: 'refresh', blurb: 'Version, updates and shortcuts' },
   ];
@@ -52,6 +53,71 @@
   async function rdDisconnect() {
     app.settings = await api.debridDisconnect();
     rd = { connected: false, account: null, error: '' };
+  }
+
+  // ---- video & music tools, Hugging Face
+  let toolsBusy = $state(false);
+  $effect(() => {
+    if (ui.settingsTab === 'media' && isTauri && !app.tools) void api.toolsState().then((t) => (app.tools = t));
+  });
+  async function toolsUpdate() {
+    toolsBusy = true;
+    try {
+      app.tools = await api.toolsUpdate();
+      toast(`yt-dlp ${app.tools.ytdlp} and ffmpeg are ready`, 'success');
+    } catch (e) {
+      toast(errorText(e), 'error', 8000);
+    } finally {
+      toolsBusy = false;
+    }
+  }
+  async function toolsRemove() {
+    app.tools = await api.toolsRemove();
+    toast('yt-dlp and ffmpeg removed. They download again when you next save a video.', 'info');
+  }
+  function setMedia(patch: Partial<MediaOptions>) {
+    set('mediaDefaults', { ...s.mediaDefaults, ...patch });
+  }
+
+  let hfUser = $state('');
+  let hfToken = $state('');
+  let hfBusy = $state(false);
+  $effect(() => {
+    if (ui.settingsTab === 'downloads' && isTauri && s.hfToken && !hfUser) void api.hfStatus().then((n) => (hfUser = n)).catch(() => {});
+  });
+  async function hfConnect() {
+    hfBusy = true;
+    try {
+      hfUser = await api.hfConnect(hfToken);
+      hfToken = '';
+      toast(`Connected to Hugging Face as ${hfUser}`, 'success');
+    } catch (e) {
+      toast(errorText(e), 'error', 8000);
+    } finally {
+      hfBusy = false;
+    }
+  }
+  async function hfDisconnect() {
+    app.settings = await api.hfDisconnect();
+    hfUser = '';
+  }
+
+  // ---- mini window hotkey
+  let recording = $state(false);
+  function recordKey(e: KeyboardEvent) {
+    if (!recording) return;
+    e.preventDefault();
+    e.stopPropagation();
+    if (e.key === 'Escape') {
+      recording = false;
+      return;
+    }
+    if (['Control', 'Shift', 'Alt', 'Meta'].includes(e.key)) return;
+    const mods = [e.ctrlKey && 'Ctrl', e.altKey && 'Alt', e.shiftKey && 'Shift', e.metaKey && 'Super'].filter(Boolean);
+    if (!mods.length) return; // a global hotkey needs a modifier
+    const key = e.code.startsWith('Key') ? e.code.slice(3) : e.code.startsWith('Digit') ? e.code.slice(5) : e.key.length === 1 ? e.key.toUpperCase() : e.code;
+    set('miniHotkey', [...mods, key].join('+'));
+    recording = false;
   }
 
   const daysLeft = (secs: number) => Math.max(0, Math.floor(secs / 86400));
@@ -158,6 +224,15 @@
 
       {#if section.id === 'general'}
         <div class="group">
+          <SettingRow title="Mini window" description="A small always-on-top window with your active downloads, total speed and Pause all. Also in the tray menu.">
+            <div class="pathrow">
+              <button class="btn sm" class:primary={recording} onclick={() => (recording = !recording)} onkeydown={recordKey}>
+                {recording ? 'Press keys…' : s.miniHotkey || 'No hotkey'}
+              </button>
+              {#if s.miniHotkey}<button class="icon-btn" title="No hotkey" onclick={() => set('miniHotkey', '')}><Icon name="x" size={14} /></button>{/if}
+              <button class="btn sm" onclick={() => api.toggleMini()}><Icon name="mini" size={14} />Show</button>
+            </div>
+          </SettingRow>
           <SettingRow title="Keep running in the tray" description="Closing the window keeps Haul downloading in the tray. Quit from the tray icon.">
             <Switch checked={s.closeToTray} label="Keep running in the tray" onchange={(v) => set('closeToTray', v)} />
           </SettingRow>
@@ -197,8 +272,13 @@
           </SettingRow>
         </div>
         <div class="group">
-          <SettingRow title="Connections per download" description="Big files are split into this many parts that download at once (when the server allows it).">
-            <input class="input n" type="number" min="1" max="32" value={s.connections} onchange={(e) => set('connections', num(e, 1, 32))} />
+          <SettingRow title="Connections per download" description="Files are split into parts that download at once (when the server allows it). Auto picks by size: 1 for small files, up to 24 for huge ones.">
+            <div class="pathrow">
+              <select class="select short-sel" value={s.connections === 0 ? 'auto' : 'set'} onchange={(e) => set('connections', (e.currentTarget as HTMLSelectElement).value === 'auto' ? 0 : 8)}>
+                <option value="auto">Auto</option><option value="set">Fixed</option>
+              </select>
+              {#if s.connections > 0}<input class="input n" type="number" min="1" max="32" value={s.connections} onchange={(e) => set('connections', num(e, 1, 32))} />{/if}
+            </div>
           </SettingRow>
           <SettingRow title="Retries" description="How many times a failed connection or download is retried, with a growing pause between tries.">
             <input class="input n" type="number" min="0" max="50" value={s.maxRetries} onchange={(e) => set('maxRetries', num(e, 0, 50))} />
@@ -206,10 +286,85 @@
           <SettingRow title="Downloads at once" description="Others wait in the queue (top of the list first, High priority before Normal). 0 = no limit.">
             <input class="input n" type="number" min="0" max="100" value={s.maxActive} onchange={(e) => set('maxActive', num(e, 0, 100))} />
           </SettingRow>
+          <SettingRow title="Hugging Face token" description={hfUser ? `Connected as ${hfUser}. Gated and private models download with your account.` : 'Only needed for gated or private models. Make a read token at huggingface.co/settings/tokens.'} wide>
+            {#if s.hfToken}
+              <div class="pathrow"><span class="grow muted small">{hfUser ? `Signed in as ${hfUser}` : 'Token saved'}</span><button class="btn sm ghost" onclick={hfDisconnect}>Disconnect</button></div>
+            {:else}
+              <div class="pathrow">
+                <input class="input mono" type="password" bind:value={hfToken} placeholder="hf_…" spellcheck="false" autocomplete="off" onkeydown={(e) => e.key === 'Enter' && hfToken.trim() && hfConnect()} />
+                <button class="btn" disabled={!hfToken.trim() || hfBusy} onclick={hfConnect}>{#if hfBusy}<span class="spinner"></span>{/if}Connect</button>
+              </div>
+            {/if}
+          </SettingRow>
           <SettingRow title="User agent" description="What Haul tells servers it is. Leave empty for the default; downloads from the browser use the browser’s." wide>
             <input class="input mono" value={s.userAgent} placeholder="Default" onchange={(e) => set('userAgent', (e.currentTarget as HTMLInputElement).value)} spellcheck="false" />
           </SettingRow>
         </div>
+
+      {:else if section.id === 'media'}
+        {@const m = s.mediaDefaults}
+        {@const t = app.tools}
+        <div class="status-card">
+          <span class="dot" class:good={!!t?.ytdlp && !!t?.ffmpeg}></span>
+          <div>
+            <strong>{t?.ytdlp ? `yt-dlp ${t.ytdlp}` : 'yt-dlp not downloaded yet'}{t?.ffmpeg ? ` · ffmpeg ${t.ffmpeg}` : ''}</strong>
+            <div class="muted small">
+              {#if t?.busy}Downloading {t.busy}… {Math.round(t.progress * 100)}%
+              {:else if t?.error}<span class="bad">{t.error}</span>
+              {:else if t?.ytdlp}Checked against their SHA-256 before use. Stored in Haul’s data folder.
+              {:else}Haul downloads them (about 140 MB) the first time you save a video, and checks their SHA-256.{/if}
+            </div>
+          </div>
+          <span class="grow"></span>
+          <button class="btn sm" disabled={toolsBusy || !!t?.busy} onclick={toolsUpdate}>{#if toolsBusy}<span class="spinner"></span>{/if}{t?.ytdlp ? 'Update now' : 'Download now'}</button>
+          {#if t?.ytdlp}<button class="btn sm ghost" onclick={toolsRemove}>Remove</button>{/if}
+        </div>
+        <div class="group" style="margin-top: 10px">
+          <SettingRow title="Keep yt-dlp up to date" description="Sites change often and break older versions. Haul checks for a new yt-dlp every few hours, and right away when a site stops working.">
+            <Switch checked={s.ytdlpAutoUpdate} label="Keep yt-dlp up to date" onchange={(v) => set('ytdlpAutoUpdate', v)} />
+          </SettingRow>
+        </div>
+        <h3>Defaults</h3>
+        <p class="faint small">The video window starts with these, and remembers what you pick there. Links sent without the window use them as they are.</p>
+        <div class="group">
+          <SettingRow title="Save as" description="Video (MP4, merged by ffmpeg) or just the audio.">
+            <div class="seg">
+              <button class:on={m.mode === 'video'} onclick={() => setMedia({ mode: 'video' })}>Video</button>
+              <button class:on={m.mode === 'audio'} onclick={() => setMedia({ mode: 'audio' })}>Audio</button>
+            </div>
+          </SettingRow>
+          <SettingRow title="Video quality" description="The highest quality to fetch. Haul takes the best the video has, up to this.">
+            <select class="select" value={String(m.height)} onchange={(e) => setMedia({ height: Number((e.currentTarget as HTMLSelectElement).value) })}>
+              {#each [[0, 'Best available'], [4320, '8K'], [2160, '4K'], [1440, '1440p'], [1080, '1080p'], [720, '720p'], [480, '480p'], [360, '360p']] as [v, l] (v)}<option value={String(v)}>{l}</option>{/each}
+            </select>
+          </SettingRow>
+          <SettingRow title="Prefer HDR" description="Pick HDR versions when a video has them (they need an HDR display to look right).">
+            <Switch checked={m.hdr} label="Prefer HDR" onchange={(v) => setMedia({ hdr: v })} />
+          </SettingRow>
+          <SettingRow title="Audio format" description="For audio-only downloads.">
+            <div class="seg">
+              {#each [['mp3', 'MP3'], ['m4a', 'M4A'], ['opus', 'Opus']] as [v, l] (v)}<button class:on={m.audioFormat === v} onclick={() => setMedia({ audioFormat: v as MediaOptions['audioFormat'] })}>{l}</button>{/each}
+            </div>
+          </SettingRow>
+          <SettingRow title="Subtitles" description="Embed subtitles in the video. Languages as yt-dlp codes (en, en,es) or all.">
+            <div class="pathrow">
+              {#if m.subtitles}<input class="input mono n2" value={m.subLangs} onchange={(e) => setMedia({ subLangs: (e.currentTarget as HTMLInputElement).value || 'en' })} spellcheck="false" />{/if}
+              <Switch checked={m.subtitles} label="Subtitles" onchange={(v) => setMedia({ subtitles: v })} />
+            </div>
+          </SettingRow>
+          <SettingRow title="Chapters" description="Keep the video’s chapters so players can jump between them.">
+            <Switch checked={m.chapters} label="Chapters" onchange={(v) => setMedia({ chapters: v })} />
+          </SettingRow>
+          <SettingRow title="Thumbnail" description="Embed the thumbnail as cover art.">
+            <Switch checked={m.thumbnail} label="Thumbnail" onchange={(v) => setMedia({ thumbnail: v })} />
+          </SettingRow>
+          <SettingRow title="SponsorBlock" description="Uses SponsorBlock’s community data to cut out sponsor, self-promo and “subscribe” segments, or mark them as chapters.">
+            <div class="seg">
+              {#each [['off', 'Off'], ['remove', 'Skip'], ['mark', 'Mark']] as [v, l] (v)}<button class:on={m.sponsorblock === v} onclick={() => setMedia({ sponsorblock: v as MediaOptions['sponsorblock'] })}>{l}</button>{/each}
+            </div>
+          </SettingRow>
+        </div>
+        <p class="faint small">Videos go to your Video folder and audio to Music, following the sorting rules. HLS (.m3u8) and DASH streams download their pieces in parallel and are joined into one file.</p>
 
       {:else if section.id === 'sorting'}
         <div class="group">
@@ -455,15 +610,24 @@
             <input class="input n" type="number" min="1024" max="65535" value={s.bridgePort} onchange={(e) => set('bridgePort', num(e, 1024, 65535))} />
           </SettingRow>
         </div>
-        <h3>Install the extension</h3>
+        <h3>Chrome, Edge or Drift</h3>
         <div class="group steps">
           <ol>
             <li>Click <button class="btn sm" onclick={() => api.openExtensionFolder()}><Icon name="folder" size={14} />Open extension folder</button></li>
-            <li>In Chrome, Edge or Drift open <span class="mono">chrome://extensions</span> (Edge: <span class="mono">edge://extensions</span>).</li>
+            <li>Open <span class="mono">chrome://extensions</span> (Edge: <span class="mono">edge://extensions</span>).</li>
             <li>Turn on <strong>Developer mode</strong>, click <strong>Load unpacked</strong> and choose that folder.</li>
-            <li>Downloads now go to Haul. Right-click a link for <strong>Download with Haul</strong>; hold <span class="kbd">Alt</span> while clicking to let the browser handle one itself.</li>
           </ol>
         </div>
+        <h3>Firefox</h3>
+        <div class="group steps">
+          <ol>
+            <li>Click <button class="btn sm" onclick={() => api.openExtensionFolder(true)}><Icon name="folder" size={14} />Open Firefox extension folder</button></li>
+            <li>Open <span class="mono">about:debugging#/runtime/this-firefox</span> and click <strong>Load Temporary Add-on…</strong></li>
+            <li>Choose <span class="mono">manifest.json</span> in that folder, then click the Haul icon once and allow it to see downloads.</li>
+          </ol>
+          <p class="faint small pad-l">Firefox forgets temporary add-ons when it closes. For a permanent install use Firefox Developer Edition or ESR with signing turned off, or the zip from the GitHub release.</p>
+        </div>
+        <p class="faint small">Downloads now go to Haul. Right-click a link for <strong>Download with Haul</strong>, or a page for <strong>Download video with Haul</strong>; video pages also get a small button. Hold <span class="kbd">Alt</span> while clicking a link to let the browser handle it.</p>
 
       {:else if section.id === 'appearance'}
         <h3>Theme</h3>
@@ -552,7 +716,7 @@
         </div>
         <h3>Keyboard</h3>
         <div class="group keys">
-          {#each [['Ctrl+N', 'New download'], ['Ctrl+O', 'Open .torrent file'], ['Ctrl+V', 'Paste a link to download it'], ['Space', 'Pause / resume'], ['Del', 'Remove (with an option to delete files)'], ['Enter / Shift+Enter', 'Open / show in folder'], ['↑ ↓, Shift for more', 'Select'], ['Ctrl+A', 'Select all'], ['Alt+↑ / Alt+↓', 'Move in the queue (Ctrl for top / bottom)'], ['Ctrl+F', 'Search'], ['F2', 'Details panel'], ['Ctrl+,', 'Settings'], ['Esc', 'Back / clear']] as [k, d] (k)}
+          {#each [['Ctrl+N', 'New download'], ['Ctrl+O', 'Open .torrent file'], ['Ctrl+V', 'Paste a link to download it'], ['Space', 'Pause / resume'], ['Del', 'Remove (with an option to delete files)'], ['Enter / Shift+Enter', 'Open / show in folder'], ['↑ ↓, Shift for more', 'Select'], ['Ctrl+A', 'Select all'], ['Alt+↑ / Alt+↓', 'Move in the queue (Ctrl for top / bottom)'], ['Ctrl+F', 'Search'], ['F2', 'Details panel'], ['Ctrl+,', 'Settings'], [s.miniHotkey || '—', 'Mini window (anywhere in Windows)'], ['Esc', 'Back / clear']] as [k, d] (k)}
             <div class="key"><span class="kbd">{k}</span><span>{d}</span></div>
           {/each}
         </div>
@@ -578,6 +742,9 @@
   .group { background: var(--surface); border: 1px solid var(--line); border-radius: 8px; margin-bottom: 10px; overflow: hidden; }
   .group :global(.srow + .srow) { border-top-color: var(--line); }
   .input.n { width: 96px; }
+  .input.n2 { width: 120px; }
+  .short-sel { width: 110px; }
+  .pad-l { padding: 0 16px 12px; margin: 0; }
   .input.t { width: 120px; }
   .select { width: 200px; }
   .select.wide { width: 260px; }

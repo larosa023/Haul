@@ -157,6 +157,24 @@ pub struct Settings {
     pub channel: String,
     pub skip_version: String,
 
+    // Video & music
+    pub media_defaults: crate::media::MediaOptions,
+    /// Keep yt-dlp up to date automatically.
+    pub ytdlp_auto_update: bool,
+
+    // Hugging Face (token encrypted, see secret.rs)
+    pub hf_token: String,
+
+    // Mini window
+    pub mini_hotkey: String,
+    pub mini_x: i32,
+    pub mini_y: i32,
+    pub mini_saved: bool,
+
+    /// Settings format version (for one-time upgrades). Missing in older files = 0.
+    #[serde(default = "zero")]
+    pub schema: u32,
+
     pub window: WindowState,
     /// Set once the first-run setup has happened.
     pub initialized: bool,
@@ -178,7 +196,8 @@ impl Default for Settings {
             notify_complete: true,
             register_handlers: true,
             download_dir: dl.to_string_lossy().to_string(),
-            connections: 8,
+            // 0 = Auto (by file size)
+            connections: 0,
             max_retries: 5,
             max_active: 4,
             user_agent: String::new(),
@@ -218,10 +237,22 @@ impl Default for Settings {
             auto_update: true,
             channel: "stable".into(),
             skip_version: String::new(),
+            media_defaults: Default::default(),
+            ytdlp_auto_update: true,
+            hf_token: String::new(),
+            mini_hotkey: "Ctrl+Alt+H".into(),
+            mini_x: 0,
+            mini_y: 0,
+            mini_saved: false,
+            schema: 3,
             window: WindowState::default(),
             initialized: false,
         }
     }
+}
+
+fn zero() -> u32 {
+    0
 }
 
 static SETTINGS: OnceLock<RwLock<Settings>> = OnceLock::new();
@@ -245,9 +276,14 @@ fn load() -> Settings {
         // A fixed random port per install, so port forwarding rules keep working.
         s.listen_port = 20000 + (std::process::id() as u16 ^ (chrono::Local::now().timestamp_subsec_nanos() as u16)) % 40000;
     }
-    if s.connections == 0 {
-        s.connections = 8;
+    // 0.3.0: connections became "Auto" by default (the old default was a fixed 8).
+    if s.schema < 3 {
+        if s.connections == 8 {
+            s.connections = 0;
+        }
+        s.schema = 3;
     }
+    s.connections = s.connections.min(32);
     s
 }
 
@@ -344,7 +380,7 @@ mod tests {
     fn old_files_get_defaults() {
         let s: Settings = serde_json::from_str(r#"{"theme":"forest"}"#).unwrap();
         assert_eq!(s.theme, "forest");
-        assert_eq!(s.connections, 8);
+        assert_eq!(s.connections, 0);
         assert_eq!(s.rules.len(), default_rules().len());
     }
 }

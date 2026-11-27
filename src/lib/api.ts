@@ -1,7 +1,7 @@
 import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 
-export type Kind = 'http' | 'torrent' | 'debrid';
+export type Kind = 'http' | 'torrent' | 'debrid' | 'media';
 export type Status = 'queued' | 'metadata' | 'checking' | 'downloading' | 'seeding' | 'paused' | 'completed' | 'error';
 
 export interface Item {
@@ -41,6 +41,8 @@ export interface Item {
   fileCount: number;
   /** Comes through Real-Debrid. */
   debrid: boolean;
+  /** Video / music downloads: what was asked for ("1080p MP4", "MP3"). */
+  media: string;
 }
 
 export interface Rule {
@@ -92,6 +94,10 @@ export interface Settings {
   debridKey: string;
   debridHosters: boolean;
   debridTorrents: 'off' | 'ask' | 'always';
+  mediaDefaults: MediaOptions;
+  ytdlpAutoUpdate: boolean;
+  hfToken: string;
+  miniHotkey: string;
   bridgeEnabled: boolean;
   bridgePort: number;
   theme: string;
@@ -160,6 +166,78 @@ export interface ProbeInfo {
   category: string;
   folder: string;
   debrid: boolean;
+  /** A web page, not a file. */
+  page: boolean;
+  /** An HLS / DASH stream playlist. */
+  stream: boolean;
+}
+
+export interface MediaOptions {
+  mode: 'video' | 'audio';
+  height: number;
+  hdr: boolean;
+  audioFormat: 'mp3' | 'm4a' | 'opus';
+  subtitles: boolean;
+  subLangs: string;
+  chapters: boolean;
+  thumbnail: boolean;
+  sponsorblock: 'off' | 'remove' | 'mark';
+}
+
+export interface MediaEntry {
+  url: string;
+  title: string;
+  duration: number;
+  uploader: string;
+}
+
+export interface MediaInfo {
+  kind: 'video' | 'playlist';
+  url: string;
+  title: string;
+  uploader: string;
+  duration: number;
+  thumbnail: string;
+  site: string;
+  heights: number[];
+  hdr: boolean;
+  subtitles: string[];
+  chapters: boolean;
+  isLive: boolean;
+  sizes: Record<string, number>;
+  audioSize: number;
+  entries: MediaEntry[];
+}
+
+export interface ToolsState {
+  ytdlp: string;
+  ffmpeg: string;
+  busy: string;
+  progress: number;
+  error: string;
+}
+
+export interface GrabLink {
+  url: string;
+  name: string;
+  ext: string;
+  category: string;
+  size: number;
+  text: string;
+}
+
+export interface HfRepo {
+  id: string;
+  kind: string;
+  revision: string;
+  file: string;
+}
+
+export interface HfFile {
+  path: string;
+  size: number;
+  sha256: string;
+  gitSha1: string;
 }
 
 export interface TorrentMeta {
@@ -211,6 +289,7 @@ export interface AddRequest {
   cookies: string;
   userAgent: string;
   fileSize: number;
+  media?: boolean;
 }
 
 export const isTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
@@ -260,7 +339,21 @@ export const api = {
   saveTheme: (name: string, json: string) => call<string>('save_theme', { name, json }),
   openThemesFolder: () => call<void>('open_themes_folder'),
   systemTheme: () => call<{ accent: string | null; light: boolean; backdrop: boolean }>('system_theme'),
-  openExtensionFolder: () => call<void>('open_extension_folder'),
+  openExtensionFolder: (firefox = false) => call<void>('open_extension_folder', { firefox }),
+  mediaInspect: (url: string) => call<MediaInfo>('media_inspect', { url }),
+  addMedia: (items: { url: string; title?: string; options: MediaOptions; folder?: string; referrer?: string; paused?: boolean }[]) =>
+    call<number[]>('add_media', { items }),
+  toolsState: () => call<ToolsState>('tools_state'),
+  toolsUpdate: () => call<ToolsState>('tools_update'),
+  toolsRemove: () => call<ToolsState>('tools_remove'),
+  grabLinks: (url: string) => call<GrabLink[]>('grab_links', { url }),
+  hfList: (input: string) => call<{ repo: HfRepo; files: HfFile[] }>('hf_list', { input }),
+  hfAdd: (add: { repo: HfRepo; files: HfFile[]; folder: string }) => call<number[]>('hf_add', { add }),
+  hfConnect: (token: string) => call<string>('hf_connect', { token }),
+  hfDisconnect: () => call<Settings>('hf_disconnect'),
+  hfStatus: () => call<string>('hf_status'),
+  toggleMini: () => call<void>('toggle_mini'),
+  showWindow: () => call<void>('show_window'),
   openDataFolder: () => call<void>('open_data_folder'),
   restartTorrents: () => call<void>('restart_torrents'),
   quit: () => call<void>('quit_app'),
