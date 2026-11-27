@@ -91,6 +91,7 @@ pub async fn set_settings(mut new: Settings) -> R<Settings> {
     // The API key only changes through debrid_connect / debrid_disconnect.
     new.debrid_key = old.debrid_key.clone();
     new.hf_token = old.hf_token.clone();
+    new.vt_key = old.vt_key.clone();
     new.schema = old.schema;
     let saved = settings::replace(new);
     if old.launch_at_startup != saved.launch_at_startup {
@@ -155,7 +156,38 @@ pub async fn inspect_url(url: String, referrer: Option<String>, cookies: Option<
         info.debrid = true;
         return Ok(info);
     }
-    http::inspect(http::Request { url, referrer: referrer.unwrap_or_default(), cookies: cookies.unwrap_or_default(), ..Default::default() }).await
+    let mut info = http::inspect(http::Request { url: url.clone(), referrer: referrer.unwrap_or_default(), cookies: cookies.unwrap_or_default(), ..Default::default() }).await?;
+    info.safety = Some(crate::safety::link_report(&url, &info.final_url, &info.name, &info.content_type, info.size));
+    Ok(info)
+}
+
+/// Checks a finished download again (safety score).
+#[tauri::command]
+pub async fn rescan(id: u64) -> R<crate::safety::Report> {
+    tauri::async_runtime::spawn_blocking(move || engine::scan_item(id).ok_or_else(|| "The file isn't there any more".to_string()))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+/// Saves (or with an empty key, removes) the VirusTotal API key, after checking it works.
+#[tauri::command]
+pub async fn set_vt_key(key: String) -> R<Settings> {
+    let key = key.trim().to_string();
+    if !key.is_empty() {
+        let r = http::client()
+            .get("https://www.virustotal.com/api/v3/users/me")
+            .header("x-apikey", &key)
+            .timeout(std::time::Duration::from_secs(15))
+            .send()
+            .await
+            .map_err(|_| "Couldn't reach VirusTotal".to_string())?;
+        if r.status().as_u16() == 401 || r.status().as_u16() == 403 {
+            return Err("VirusTotal didn't accept that API key".into());
+        }
+    }
+    let s = settings::update(|s| s.vt_key = if key.is_empty() { String::new() } else { secret::seal(&key) });
+    engine::emit("settings", s.clone());
+    Ok(s)
 }
 
 #[tauri::command]

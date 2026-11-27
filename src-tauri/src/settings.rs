@@ -131,6 +131,15 @@ pub struct Settings {
     pub bind_adapter: String,
     pub preallocate: bool,
 
+    // Safety
+    /// Check finished downloads and give them a safety score.
+    pub safety_scan: bool,
+    /// Include a Windows Defender scan in that check.
+    pub safety_defender: bool,
+    /// Mark downloads as from the internet (Zone.Identifier), like browsers do.
+    pub safety_motw: bool,
+    /// Optional VirusTotal API key (sealed); only file hashes are looked up.
+    pub vt_key: String,
     // Debrid (Real-Debrid)
     pub debrid_enabled: bool,
     /// The API key, encrypted for this Windows account (see secret.rs).
@@ -150,6 +159,8 @@ pub struct Settings {
     pub accent: String,
     pub native_title_bar: bool,
     pub compact_rows: bool,
+    /// Show speeds in bits (Mbps), like internet plans, instead of bytes (MB/s).
+    pub speed_bits: bool,
 
     // Updates
     pub auto_update: bool,
@@ -224,6 +235,10 @@ impl Default for Settings {
             seed_time_limit: 0,
             bind_adapter: String::new(),
             preallocate: false,
+            safety_scan: true,
+            safety_defender: true,
+            safety_motw: true,
+            vt_key: String::new(),
             debrid_enabled: true,
             debrid_key: String::new(),
             debrid_hosters: true,
@@ -234,6 +249,7 @@ impl Default for Settings {
             accent: "theme".into(),
             native_title_bar: false,
             compact_rows: false,
+            speed_bits: false,
             auto_update: true,
             channel: "stable".into(),
             skip_version: String::new(),

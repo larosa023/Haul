@@ -18,6 +18,7 @@ mod netif;
 mod notify;
 mod paths;
 mod settings;
+mod safety;
 mod sorter;
 mod tools;
 mod torrent;
@@ -344,6 +345,8 @@ pub fn run() {
             commands::hf_connect,
             commands::hf_disconnect,
             commands::hf_status,
+            commands::rescan,
+            commands::set_vt_key,
             ui_ready,
             set_backdrop,
             set_native_frame,

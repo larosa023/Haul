@@ -136,6 +136,10 @@ pub struct ProbeInfo {
     pub page: bool,
     /// The link is a stream playlist (HLS .m3u8 / DASH .mpd).
     pub stream: bool,
+    /// What the server says the file is.
+    pub content_type: String,
+    /// Safety check of the link (filled in by the Add dialog's lookup).
+    pub safety: Option<crate::safety::Report>,
 }
 
 struct Probe {
@@ -313,7 +317,7 @@ async fn probe(req: &Request, from: u64, end: Option<u64>) -> Result<Probe, Fail
         resp.bytes_stream().map(|r| r.map_err(net_fail)).boxed()
     });
     Ok(Probe {
-        info: ProbeInfo { name, size, resumable, final_url, etag, last_modified, category, folder, debrid: false, page, stream },
+        info: ProbeInfo { name, size, resumable, final_url, etag, last_modified, category, folder, debrid: false, page, stream, content_type: ct_main.clone(), safety: None },
         response,
     })
 }

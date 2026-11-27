@@ -1,10 +1,12 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { api } from './lib/api';
-  import { app, load, listenAll } from './lib/state.svelte';
+  import { app, history, load, listenAll } from './lib/state.svelte';
+  import { setSpeedBits } from './lib/format.js';
   import { applyTheme, reloadThemes, refreshSystem } from './lib/theme.svelte';
   import { speed, percent, eta } from './lib/format.js';
   import Icon from './lib/components/Icon.svelte';
+  import SpeedGraph from './lib/components/SpeedGraph.svelte';
 
   onMount(() => {
     document.documentElement.dataset.mini = 'true';
@@ -14,6 +16,10 @@
       await load().catch(() => {});
       requestAnimationFrame(() => requestAnimationFrame(() => void api.uiReady().catch(() => {})));
     })();
+  });
+
+  $effect(() => {
+    if (app.settings) setSpeedBits(app.settings.speedBits);
   });
 
   $effect(() => {
@@ -41,6 +47,7 @@
 </script>
 
 <div class="mini" role="presentation" onmousedown={drag}>
+  <div class="spark"><SpeedGraph data={history.total} height={46} dot={false} /></div>
   <header>
     <div class="speed">
       <span class="d"><Icon name="download" size={14} stroke={2.2} />{speed(down) || '0 B/s'}</span>
@@ -80,7 +87,8 @@
     border-radius: 12px; border: 1px solid var(--line); background: var(--solid-bg, var(--bg));
     box-shadow: 0 6px 18px rgb(0 0 0 / 0.35); cursor: default;
   }
-  header { display: flex; align-items: center; gap: 4px; padding: 8px 8px 6px 12px; }
+  .spark { position: absolute; left: 0; right: 0; top: 0; opacity: 0.5; pointer-events: none; }
+  header { position: relative; display: flex; align-items: center; gap: 4px; padding: 8px 8px 6px 12px; }
   .speed { flex: 1; display: flex; align-items: baseline; gap: 10px; font-variant-numeric: tabular-nums; }
   .speed span { display: inline-flex; align-items: center; gap: 4px; }
   .d { font: 600 16px var(--font-display); color: var(--text); }

@@ -1,9 +1,12 @@
 <script lang="ts">
   import Icon from './Icon.svelte';
   import Switch from './Switch.svelte';
+  import SpeedGraph from './SpeedGraph.svelte';
+  import SegmentMap from './SegmentMap.svelte';
+  import Safety from './Safety.svelte';
   import { api, type Item, type TorrentFile } from '../api';
-  import { app, ui, selectedItems, toast, errorText } from '../state.svelte';
-  import { bytes, date, duration, percent, statusLabel } from '../format.js';
+  import { app, ui, history, selectedItems, toast, errorText } from '../state.svelte';
+  import { bytes, date, duration, percent, statusLabel, speed, eta } from '../format.js';
 
   const sel = $derived(selectedItems());
   const it = $derived(sel.length === 1 ? sel[0] : null);
@@ -32,6 +35,41 @@
     filesTimer = setInterval(() => loadFiles(id), 2000);
     return () => clearInterval(filesTimer);
   });
+
+  // Live view: speed graph for anything downloading, and the parts map for direct downloads.
+  const live = $derived(!!it && ui.detailsTab === 'general' && (it.status === 'downloading' || !!history.items[it.id]?.length));
+  const hist = $derived(it ? (history.items[it.id] ?? []) : []);
+  const peak = $derived(hist.length ? Math.max(...hist) : 0);
+  const avg = $derived(hist.length ? hist.reduce((a, b) => a + b, 0) / hist.length : 0);
+  let segs: { start: number; end: number; done: number }[] = $state([]);
+  $effect(() => {
+    const id = live && it && (it.kind === 'http') && it.resumable ? it.id : 0;
+    segs = [];
+    if (!id) return;
+    let alive = true;
+    const load = async () => {
+      const v = await api.item(id).catch(() => null);
+      if (alive) segs = ((v?.segmentList as typeof segs) ?? []).slice();
+    };
+    void load();
+    const t = setInterval(load, 1000);
+    return () => {
+      alive = false;
+      clearInterval(t);
+    };
+  });
+
+  let scanning = $state(false);
+  async function rescan(id: number) {
+    scanning = true;
+    try {
+      await api.rescan(id);
+    } catch (e) {
+      toast(errorText(e), 'error');
+    } finally {
+      scanning = false;
+    }
+  }
 
   async function setPrio(f: TorrentFile, p: number) {
     if (!it) return;
@@ -102,6 +140,13 @@
 
     <div class="body">
       {#if it && ui.detailsTab === 'general'}
+        <div class="gen" class:live>
+        <div class="col">
+        {#if it.safety}
+          <div class="safe"><Safety report={it.safety} open={it.safety.grade >= 'C'} {scanning} onrescan={it.status === 'completed' || it.status === 'seeding' ? () => rescan(it.id) : undefined} /></div>
+        {:else if it.status === 'completed' && it.kind !== 'debrid'}
+          <button class="btn sm ghost safe" disabled={scanning} onclick={() => rescan(it.id)}>{#if scanning}<span class="spinner"></span>{:else}<Icon name="shield" size={14} />{/if}Check safety</button>
+        {/if}
         <div class="grid">
           <span class="k">Status</span><span class="v">{statusLabel(it)}{it.note ? ` · ${it.note}` : ''}</span>
           {#if it.error}<span class="k">Problem</span><span class="v err">{it.error}</span>{/if}
@@ -130,6 +175,27 @@
           <span class="k">Added</span><span class="v">{date(it.added)}</span>
           {#if it.finishedAt}<span class="k">Finished</span><span class="v">{date(it.finishedAt)}</span>{/if}
         </div>
+        </div>
+        {#if live && it}
+          <div class="livecard">
+            <div class="lhead">
+              <span class="big">{speed(it.speedDown) || '—'}</span>
+              <span class="muted lsub">{eta(it.eta) ? `${eta(it.eta)} left` : ''}</span>
+            </div>
+            <div class="gwrap"><SpeedGraph data={hist} height={70} /></div>
+            <div class="stats">
+              <span>Peak <b>{speed(peak) || '—'}</b></span>
+              <span>Average <b>{speed(avg) || '—'}</b></span>
+              <span>{it.kind === 'torrent' ? `${it.peers} peers` : it.note || ''}</span>
+            </div>
+            {#if segs.length}
+              <SegmentMap segments={segs} size={it.size} />
+              <div class="faint maplbl">{segs.filter((x) => x.done < x.end - x.start).length} of {segs.length} parts still downloading</div>
+            {/if}
+          </div>
+        {/if}
+        </div>
+        
       {:else if it && ui.detailsTab === 'files'}
         <div class="files">
           <div class="fhead">
@@ -240,6 +306,19 @@
   .tabs .icon-btn { width: 28px; height: 28px; }
   .grow { flex: 1; }
   .body { flex: 1; overflow: auto; padding: 12px 16px; user-select: text; }
+  .gen.live { display: grid; grid-template-columns: minmax(0, 1fr) minmax(300px, 40%); gap: 18px; align-items: start; }
+  .livecard { display: flex; flex-direction: column; gap: 8px; padding: 12px 14px; border-radius: 10px; border: 1px solid var(--line); background: linear-gradient(160deg, color-mix(in srgb, var(--accent) 10%, var(--bg)), var(--bg)); user-select: none; }
+  .lhead { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+  .big { font: 600 24px var(--font-display); font-variant-numeric: tabular-nums; letter-spacing: -0.01em; }
+  .lsub { font-size: 12px; font-variant-numeric: tabular-nums; }
+  .gwrap { position: relative; }
+  .stats { display: flex; gap: 14px; font-size: 11.5px; color: var(--text-3); font-variant-numeric: tabular-nums; }
+  .stats b { color: var(--text-2); font-weight: 600; }
+  .stats span:last-child { margin-left: auto; }
+  .maplbl { font-size: 11px; }
+  .col { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
+  .safe { max-width: 620px; align-self: flex-start; }
+  div.safe { align-self: stretch; }
   .grid { display: grid; grid-template-columns: 110px 1fr; gap: 7px 14px; font-size: 12.5px; align-items: baseline; }
   .k { color: var(--text-3); }
   .v { min-width: 0; overflow-wrap: anywhere; }

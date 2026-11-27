@@ -2,6 +2,7 @@
   import { onMount } from 'svelte';
   import { api, isTauri } from './lib/api';
   import { app, ui, selection, load, listenAll, nextPending, visibleItems, selectedItems, selectOnly, toast, errorText, refreshOrder } from './lib/state.svelte';
+  import { setSpeedBits } from './lib/format.js';
   import { applyTheme, reloadThemes, refreshSystem } from './lib/theme.svelte';
   import Sidebar from './lib/components/Sidebar.svelte';
   import TopBar from './lib/components/TopBar.svelte';
@@ -41,6 +42,10 @@
   });
 
   // Live theming: any change to theme, accent or the system colors applies at once.
+  $effect(() => {
+    if (app.settings) setSpeedBits(app.settings.speedBits);
+  });
+
   $effect(() => {
     if (app.settings) applyTheme({ theme: app.settings.theme, accent: app.settings.accent, compactRows: app.settings.compactRows });
   });

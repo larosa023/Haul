@@ -45,6 +45,14 @@ export const ui = $state({
 
 export const selection = new SvelteSet<number>();
 
+/** The last 90 seconds of speed: overall, and per active download (for the live graphs). */
+export const history = $state({ total: [] as number[], up: [] as number[], items: {} as Record<number, number[]> });
+const HIST = 90;
+function push(arr: number[], v: number) {
+  arr.push(v);
+  if (arr.length > HIST) arr.splice(0, arr.length - HIST);
+}
+
 let toastId = 0;
 export function toast(text: string, kind: 'info' | 'success' | 'error' = 'info', ms = 4500, action?: { label: string; run: () => void }) {
   const id = ++toastId;
@@ -124,16 +132,23 @@ export function listenAll() {
     for (const it of list) {
       if (!app.items[it.id]) app.order.push(it.id);
       app.items[it.id] = it;
+      if (it.status === 'downloading') push((history.items[it.id] ??= []), it.speedDown);
+      else if (history.items[it.id] && it.status !== 'metadata' && it.status !== 'checking') delete history.items[it.id];
     }
   });
   on<number[]>('removed', (ids) => {
     for (const id of ids) {
       delete app.items[id];
+      delete history.items[id];
       selection.delete(id);
     }
     app.order = app.order.filter((id) => app.items[id]);
   });
-  on<Totals>('totals', (t) => (app.totals = t));
+  on<Totals>('totals', (t) => {
+    app.totals = t;
+    push(history.total, t.down);
+    push(history.up, t.up);
+  });
   on<UpdateState>('update', (u) => {
     app.update = u;
     if (u.status === 'ready') ui.updateDismissed = false;

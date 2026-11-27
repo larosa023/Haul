@@ -22,6 +22,8 @@ Haul does what IDM, qBittorrent and a video downloader do, in a single small app
   - **Subtitles** (pick languages), **chapters**, **embedded thumbnails**, and **SponsorBlock** to skip or mark sponsor segments.
   - **Playlists and channels**: see the list, pick the videos, queue them all.
   - Haul fetches **yt-dlp and ffmpeg** on first use (not bundled), checks their SHA-256 against the releases, and keeps yt-dlp updated by itself, since sites break older versions often.
+- **Safety score** for every download, A to F, with the reasons: the link is checked when you paste it (encryption, look-alike or scam-prone sites, disguised names like `invoice.pdf.exe`), and the file when it finishes (does it match its name, is a program signed and by whom, what's inside archives, a Windows Defender scan, and optionally VirusTotal by hash). Downloads are marked as from the internet so SmartScreen checks them.
+- **Live view**: a speed graph with peak and average, and a map of each connection filling its part of the file. Speeds in MB/s or Mbps.
 - **Batch downloads**: paste many links, or a pattern like `file[001-100].zip` (also `[a-z]` and steps like `[0-100:5]`).
 - **Site grabber**: point it at a page and it lists every file the page links to, with sizes. Filter by type, size or name, then pick what to download.
 - **Hugging Face models and datasets**: paste a link or `org/name`, pick the files (one click for just the `.safetensors` or one GGUF), and each downloads over several connections and is checked against its SHA-256. Add a token in Settings for gated or private models.

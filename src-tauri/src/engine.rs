@@ -658,6 +658,34 @@ fn mark_finished(id: u64) {
     });
 }
 
+/// The path to check for a download: its file, or a torrent's folder (or single file).
+fn scan_path(it: &Item) -> Option<std::path::PathBuf> {
+    match it.kind {
+        Kind::Torrent => {
+            let files = torrent::files(&it.info_hash);
+            let first = files.first()?.0.clone();
+            let root = std::path::Path::new(&first).components().next()?.as_os_str().to_owned();
+            Some(std::path::Path::new(&it.save_dir).join(root))
+        }
+        _ if !it.file_name.is_empty() => Some(it.file_path()),
+        _ => None,
+    }
+}
+
+/// Runs the safety check on a download and stores the result. Blocking.
+pub fn scan_item(id: u64) -> Option<crate::safety::Report> {
+    let it = model::with(|st| st.get(id).cloned())?;
+    let path = scan_path(&it).filter(|p| p.exists())?;
+    let name = path.file_name().map(|n| n.to_string_lossy().to_string()).unwrap_or_default();
+    let source = if it.kind == Kind::Torrent { String::new() } else { it.source.clone() };
+    let r = crate::safety::scan(&path, &name, &source, &it.final_url);
+    model::with(|st| st.get_mut(id).map(|i| i.safety = Some(r.clone())));
+    if let Some(v) = model::with(|st| st.get(id).map(|i| i.view())) {
+        emit("items", vec![v]);
+    }
+    Some(r)
+}
+
 fn after_finish(id: u64) {
     let Some(it) = model::with(|st| st.get(id).cloned()) else { return };
     let s = settings::get();
@@ -701,8 +729,30 @@ fn after_finish(id: u64) {
             return;
         }
     }
-    // Extract
-    if s.auto_extract && !it.extracted {
+    // Mark it as from the internet, then check it.
+    if s.safety_motw && matches!(it.kind, Kind::Http | Kind::Media) {
+        crate::safety::mark_of_the_web(&it.file_path(), &it.source, &it.referrer);
+    }
+    let mut threat = false;
+    if s.safety_scan && it.safety.as_ref().is_none_or(|r| r.stage != "file") {
+        model::with(|st| st.get_mut(id).map(|i| i.note = "Checking safety…".into()));
+        if let Some(r) = scan_item(id) {
+            threat = r.defender == "threat" || r.grade == "F";
+            if threat {
+                let why = r.findings.first().map(|f| f.text.clone()).unwrap_or_default();
+                notify::show(id, "This download may be unsafe", &format!("{}: {why}", it.name), false);
+            }
+        }
+        model::with(|st| {
+            st.get_mut(id).map(|i| {
+                if i.note == "Checking safety…" {
+                    i.note.clear();
+                }
+            })
+        });
+    }
+    // Extract (not when the file looks dangerous)
+    if s.auto_extract && !it.extracted && !threat {
         let archives: Vec<std::path::PathBuf> = if it.kind == Kind::Http {
             vec![it.file_path()]
         } else {
@@ -796,6 +846,7 @@ pub fn add_http(a: HttpAdd) -> Result<u64, String> {
             connections: a.connections,
             git_sha1: a.git_sha1,
             hf_auth: a.hf_auth,
+            safety: Some(crate::safety::link_report(&url, "", &if a.name.trim().is_empty() { http::url_name(&url).unwrap_or_default() } else { name.clone() }, "", 0)),
             paused: a.paused,
             priority: a.priority,
             status: if a.paused { Status::Paused } else { Status::Queued },

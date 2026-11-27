@@ -144,6 +144,7 @@
                 <span class="title" title={it.name}>{it.name}</span>
                 {#if !compact}<span class="subline" class:errtext={it.status === 'error'} title={sub(it)}>{sub(it)}</span>{/if}
               </span>
+              {#if it.safety && (it.safety.stage === 'file' || it.safety.grade >= 'D')}<span class="sg g{it.safety.grade}" title="Safety {it.safety.grade} ({it.safety.score}/100): {it.safety.findings[0]?.text ?? ''}">{it.safety.grade}</span>{/if}
               {#if it.priority > 0}<span class="chip pri" title="High priority">High</span>{/if}
               {#if it.limitDown || it.limitUp}<span class="lim" title="Has its own speed limit"><Icon name="gauge" size={13} /></span>{/if}
             </span>
@@ -152,7 +153,7 @@
               <span class="bar"><span class="fill" style="width: {it.status === 'metadata' ? 0 : pct}%"></span>{#if it.status === 'metadata' || it.status === 'checking'}<span class="indet"></span>{/if}</span>
               <span class="pct">{it.status === 'metadata' ? '' : `${pct >= 99.95 || pct === 0 ? pct.toFixed(0) : pct.toFixed(1)}%`}</span>
             </span>
-            <span class="c-speed">{it.status === 'downloading' ? speed(it.speedDown) : it.status === 'seeding' ? speed(it.speedUp) : ''}</span>
+            <span class="c-speed" class:hot={it.status === 'downloading' && it.speedDown > 0}>{it.status === 'downloading' ? speed(it.speedDown) : it.status === 'seeding' ? speed(it.speedUp) : ''}</span>
             <span class="c-eta">{it.status === 'downloading' ? eta(it.eta) : ''}</span>
             <span class="c-status"><span class="dot"></span>{statusLabel(it)}</span>
           </div>
@@ -185,17 +186,28 @@
   .head .c-size, .head .c-speed, .head .c-eta, .row .c-size, .row .c-speed, .row .c-eta { text-align: right; }
   .c-prog { display: flex; align-items: center; gap: 8px; }
   .bar { position: relative; flex: 1; height: 5px; border-radius: 3px; background: var(--surface-strong); overflow: hidden; }
-  .fill { position: absolute; inset: 0 auto 0 0; background: var(--accent); border-radius: 3px; transition: width 600ms linear; }
+  .fill { position: absolute; inset: 0 auto 0 0; background: var(--accent); border-radius: 3px; transition: width 900ms linear; }
+  /* Running: a brighter leading edge and a sheen that sweeps along the bar (GPU-only transform). */
+  .run .bar { height: 6px; }
+  .run .fill { background: linear-gradient(90deg, color-mix(in srgb, var(--accent) 55%, var(--surface-strong)), var(--accent)); box-shadow: 0 0 8px color-mix(in srgb, var(--accent) 45%, transparent); overflow: hidden; }
+  .run .fill::after { content: ''; position: absolute; inset: 0; background: linear-gradient(90deg, transparent, rgb(255 255 255 / 0.35), transparent); transform: translateX(-100%); animation: sheen 1.8s ease-in-out infinite; }
+  @keyframes sheen { to { transform: translateX(100%); } }
+  @media (prefers-reduced-motion: reduce) { .run .fill::after { animation: none; } }
   .done .fill { background: var(--ok); }
   .seed .fill { background: var(--ok); }
   .err .fill { background: var(--danger); }
   .idle .fill { background: var(--text-3); }
   .indet { position: absolute; top: 0; bottom: 0; width: 30%; background: var(--accent); border-radius: 3px; animation: indet 1.2s ease-in-out infinite; }
   @keyframes indet { from { left: -30%; } to { left: 100%; } }
+  .sg { flex-shrink: 0; min-width: 18px; height: 18px; padding: 0 4px; border-radius: 5px; display: grid; place-items: center; font: 700 11px var(--font-display); color: #fff; background: var(--ok); opacity: 0.9; }
+  .sg.gC { background: var(--warn); color: #1a1300; }
+  .sg.gD, .sg.gF { background: var(--danger); }
+  .c-speed.hot { color: var(--text); font-weight: 600; }
   .pct { width: 42px; text-align: right; font-size: 12px; color: var(--text-2); }
   .c-status { display: flex; align-items: center; gap: 7px; font-size: 12.5px; color: var(--text-2); white-space: nowrap; }
   .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--text-3); flex-shrink: 0; }
-  .run .dot { background: var(--accent); }
+  .run .dot { background: var(--accent); box-shadow: 0 0 0 0 var(--accent); animation: beat 1.6s ease-out infinite; }
+  @keyframes beat { 0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--accent) 60%, transparent); } 100% { box-shadow: 0 0 0 6px transparent; } }
   .seed .dot, .done .dot { background: var(--ok); }
   .err .dot { background: var(--danger); }
   .err .c-status { color: var(--danger); }

@@ -136,6 +136,8 @@ pub struct Item {
     pub git_sha1: String,
     /// Send the Hugging Face token (gated models).
     pub hf_auth: bool,
+    /// Safety score: of the link when added, of the file once it's scanned.
+    pub safety: Option<crate::safety::Report>,
 
     pub extracted: bool,
     pub notified: bool,
@@ -208,6 +210,7 @@ impl Item {
             "fileCount": if self.kind == Kind::Torrent { self.file_prio.len() } else { 1 },
             "debrid": !self.debrid_link.is_empty() || self.kind == Kind::Debrid,
             "media": self.media.as_ref().map(|m| m.label()).unwrap_or_default(),
+            "safety": self.safety,
         })
     }
 }

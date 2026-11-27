@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.3.1
+
+- **Safety score.** Every download gets a grade from A (looks safe) to F (likely dangerous), with the reasons listed under it.
+  - When you paste a link: is it encrypted, is the site a bare IP, a look-alike name, a short link or a scam-prone domain, is it a program, and is the name disguised (like `invoice.pdf.exe` or hidden reversed text)?
+  - When it finishes: does the content match its name (a program posing as a video gets an F), is a program digitally signed and by whom, what's inside archives (programs, disguised names, passwords), and a Windows Defender scan. Dangerous files aren't auto-extracted, and you get a warning.
+  - Optional VirusTotal check with your own free key (only the file's SHA-256 is sent).
+  - Downloads are now marked as from the internet, like browsers do, so SmartScreen and Office Protected View work on them.
+  - Settings → Safety turns each part on or off.
+- **Live download view.** A live speed graph with peak and average, and a map of every connection filling its part of the file. Running progress bars glow and shimmer, there's a speed graph behind the totals in the sidebar and in the mini window.
+- **Speeds in Mbps** (Settings → Appearance), the unit internet plans use. 111 MB/s is about 930 Mbps.
+
 ## 0.3.0
 
 - **Video and music downloads** from YouTube and the 1,800+ other sites yt-dlp supports. Paste a link (or use the browser button) and pick the quality, up to 8K and HDR as MP4, or audio only as MP3, M4A or Opus. Options for subtitles, chapters, embedded thumbnails and SponsorBlock (skip or mark sponsor segments). Playlists and channels list their videos so you can pick which to queue. Videos go to your Video folder and audio to Music, by the sorting rules.

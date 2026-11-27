@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { bytes, eta, matchesFilter, matchesSearch, linkKind, urlName, percent, expandPattern, batchLinks, clock } from '../src/lib/format.js';
+import { speed, setSpeedBits, bytes, eta, matchesFilter, matchesSearch, linkKind, urlName, percent, expandPattern, batchLinks, clock } from '../src/lib/format.js';
 
 test('sizes and times', () => {
   assert.equal(bytes(0), '0 B');
@@ -46,4 +46,13 @@ test('batch patterns', () => {
   assert.equal(expandPattern('x[1-99999]', 100).length, 100);
   assert.equal(batchLinks('https://a.org/f[01-12].bin\nhello\nhttps://b.org/x.zip https://b.org/x.zip').length, 13);
   assert.equal(clock(3725), '1:02:05');
+});
+
+test('speed units', () => {
+  assert.equal(speed(111 * 1024 * 1024), '111 MB/s');
+  setSpeedBits(true);
+  assert.equal(speed(111 * 1024 * 1024), '931 Mbps');
+  assert.equal(speed(150e6), '1.20 Gbps');
+  assert.equal(speed(1e6), '8.0 Mbps');
+  setSpeedBits(false);
 });

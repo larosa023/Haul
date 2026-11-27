@@ -16,6 +16,7 @@
     { id: 'speed', label: 'Speed & schedule', icon: 'gauge', blurb: 'Limits, and slower speeds at set times' },
     { id: 'torrents', label: 'Torrents', icon: 'magnet', blurb: 'Seeding, peers, privacy and ports' },
     { id: 'network', label: 'Network adapter', icon: 'network', blurb: 'Keep torrents on your VPN' },
+    { id: 'safety', label: 'Safety', icon: 'shield', blurb: 'Safety scores, Windows Defender and VirusTotal' },
     { id: 'debrid', label: 'Debrid', icon: 'cloud', blurb: 'Real-Debrid for file hosters and torrents' },
     { id: 'browser', label: 'Browser', icon: 'puzzle', blurb: 'Send downloads from Chrome, Edge, Drift or Firefox' },
     { id: 'appearance', label: 'Appearance', icon: 'brush', blurb: 'Themes, accent color and layout' },
@@ -100,6 +101,22 @@
   async function hfDisconnect() {
     app.settings = await api.hfDisconnect();
     hfUser = '';
+  }
+
+  // ---- safety
+  let vtKey = $state('');
+  let vtBusy = $state(false);
+  async function saveVt(key: string) {
+    vtBusy = true;
+    try {
+      app.settings = await api.setVtKey(key);
+      vtKey = '';
+      toast(key ? 'VirusTotal connected' : 'VirusTotal key removed', 'success');
+    } catch (e) {
+      toast(errorText(e), 'error', 8000);
+    } finally {
+      vtBusy = false;
+    }
   }
 
   // ---- mini window hotkey
@@ -549,6 +566,32 @@
         </div>
         <p class="muted small">Adapters: <button class="link" onclick={() => api.adapters().then((a) => (adapters = a))}>refresh list</button></p>
 
+      {:else if section.id === 'safety'}
+        <p class="muted small">Every link gets a safety score from <strong>A</strong> (looks safe) to <strong>F</strong> (likely dangerous) when you paste it, and again once the file has downloaded and been checked. Click a score to see the reasons.</p>
+        <div class="group">
+          <SettingRow title="Check finished downloads" description="Looks at the file itself: does it match its name, is a program signed and by whom, what's inside archives. Dangerous files aren't auto-extracted, and you get a warning.">
+            <Switch checked={s.safetyScan} label="Check finished downloads" onchange={(v) => set('safetyScan', v)} />
+          </SettingRow>
+          <SettingRow title="Scan with Windows Defender" description="Part of the check. If Defender finds something it quarantines it, as usual.">
+            <Switch checked={s.safetyDefender} label="Scan with Windows Defender" onchange={(v) => set('safetyDefender', v)} />
+          </SettingRow>
+          <SettingRow title="Mark downloads as from the internet" description="Like browsers do, so Windows SmartScreen checks programs and Office opens documents in Protected View.">
+            <Switch checked={s.safetyMotw} label="Mark as from the internet" onchange={(v) => set('safetyMotw', v)} />
+          </SettingRow>
+          <SettingRow title="VirusTotal (optional)" description={s.vtKey ? 'Connected. Finished files are looked up by their SHA-256; the file itself is never uploaded.' : 'Add a free API key from virustotal.com to see what 70+ antivirus engines say. Only the file’s SHA-256 is sent, never the file.'} wide>
+            {#if s.vtKey}
+              <div class="pathrow"><span class="grow muted small">Key saved (encrypted for your Windows account)</span><button class="btn sm ghost" disabled={vtBusy} onclick={() => saveVt('')}>Remove</button></div>
+            {:else}
+              <div class="pathrow">
+                <input class="input mono" type="password" bind:value={vtKey} placeholder="VirusTotal API key" spellcheck="false" autocomplete="off" onkeydown={(e) => e.key === 'Enter' && vtKey.trim() && saveVt(vtKey)} />
+                <button class="btn" disabled={!vtKey.trim() || vtBusy} onclick={() => saveVt(vtKey)}>{#if vtBusy}<span class="spinner"></span>{/if}Connect</button>
+                <button class="btn ghost" onclick={() => api.openLink('https://www.virustotal.com/gui/my-apikey')}>Get a key</button>
+              </div>
+            {/if}
+          </SettingRow>
+        </div>
+        <p class="faint small">A score is a guide, not a guarantee: a well-made threat can still look clean, and a safe tool can look unusual. When in doubt, don't run programs from sites you don't know.</p>
+
       {:else if section.id === 'debrid'}
         {#if s.debridKey && rd?.connected !== false}
           <div class="status-card">
@@ -670,6 +713,9 @@
 
         <h3>Layout</h3>
         <div class="group">
+          <SettingRow title="Speeds in Mbps" description="Show speeds in megabits per second, the unit internet plans use (1 MB/s = 8 Mbps), instead of megabytes per second.">
+            <Switch checked={s.speedBits} label="Speeds in Mbps" onchange={(v) => set('speedBits', v)} />
+          </SettingRow>
           <SettingRow title="Compact rows" description="Fit more downloads on screen.">
             <Switch checked={s.compactRows} label="Compact rows" onchange={(v) => set('compactRows', v)} />
           </SettingRow>

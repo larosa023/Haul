@@ -43,6 +43,23 @@ export interface Item {
   debrid: boolean;
   /** Video / music downloads: what was asked for ("1080p MP4", "MP3"). */
   media: string;
+  /** Safety score (of the link, then of the file once scanned). */
+  safety: SafetyReport | null;
+}
+
+export interface SafetyFinding {
+  level: 'good' | 'info' | 'warn' | 'bad';
+  text: string;
+  points: number;
+}
+
+export interface SafetyReport {
+  score: number;
+  grade: 'A' | 'B' | 'C' | 'D' | 'F';
+  stage: 'link' | 'file';
+  defender: string;
+  findings: SafetyFinding[];
+  checkedAt: number;
 }
 
 export interface Rule {
@@ -98,12 +115,17 @@ export interface Settings {
   ytdlpAutoUpdate: boolean;
   hfToken: string;
   miniHotkey: string;
+  safetyScan: boolean;
+  safetyDefender: boolean;
+  safetyMotw: boolean;
+  vtKey: string;
   bridgeEnabled: boolean;
   bridgePort: number;
   theme: string;
   accent: string;
   nativeTitleBar: boolean;
   compactRows: boolean;
+  speedBits: boolean;
   autoUpdate: boolean;
   channel: 'stable' | 'beta';
   skipVersion: string;
@@ -170,6 +192,8 @@ export interface ProbeInfo {
   page: boolean;
   /** An HLS / DASH stream playlist. */
   stream: boolean;
+  contentType: string;
+  safety: SafetyReport | null;
 }
 
 export interface MediaOptions {
@@ -353,6 +377,8 @@ export const api = {
   hfDisconnect: () => call<Settings>('hf_disconnect'),
   hfStatus: () => call<string>('hf_status'),
   toggleMini: () => call<void>('toggle_mini'),
+  rescan: (id: number) => call<SafetyReport>('rescan', { id }),
+  setVtKey: (key: string) => call<Settings>('set_vt_key', { key }),
   showWindow: () => call<void>('show_window'),
   openDataFolder: () => call<void>('open_data_folder'),
   restartTorrents: () => call<void>('restart_torrents'),

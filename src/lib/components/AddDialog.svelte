@@ -2,6 +2,7 @@
   import Modal from './Modal.svelte';
   import Icon from './Icon.svelte';
   import Switch from './Switch.svelte';
+  import Safety from './Safety.svelte';
   import { api, isTauri, type AddRequest, type ProbeInfo } from '../api';
   import { app, ui, toast, errorText, selectOnly } from '../state.svelte';
   import { bytes, linkKind, batchLinks } from '../format.js';
@@ -196,6 +197,7 @@
           <span class="chip" title={probe.resumable ? 'Can be paused and resumed, and uses several connections' : 'This server sends the file in one piece, so it can’t resume'}>{probe.resumable ? 'Resumable' : 'No resume'}</span>
         {/if}
       </div>
+      {#if probe?.safety && !probe.page}<Safety report={probe.safety} compact open={probe.safety.grade !== 'A'} />{/if}
       {#if probe?.page}
         <div class="pagebox">
           <Icon name="globe" size={18} />

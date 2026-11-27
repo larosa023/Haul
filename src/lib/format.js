@@ -12,8 +12,20 @@ export function bytes(n) {
   return `${v >= 100 || i === 0 ? Math.round(v) : v.toFixed(1)} ${u[i]}`;
 }
 
+let bits = false;
+/** Show speeds in bits per second (Mbps, like internet plans) instead of bytes (MB/s). */
+export function setSpeedBits(on) {
+  bits = !!on;
+}
+
 export function speed(n) {
   if (!n) return '';
+  if (bits) {
+    const b = n * 8;
+    if (b >= 1e9) return `${(b / 1e9).toFixed(2)} Gbps`;
+    if (b >= 1e6) return `${b >= 1e8 ? Math.round(b / 1e6) : (b / 1e6).toFixed(1)} Mbps`;
+    return `${Math.max(1, Math.round(b / 1e3))} Kbps`;
+  }
   return `${bytes(n)}/s`;
 }
 

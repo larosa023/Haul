@@ -93,7 +93,7 @@ fn extract_with_tar(archive: &Path, dest: &Path) -> anyhow::Result<()> {
     Ok(())
 }
 
-fn system_tar() -> PathBuf {
+pub fn system_tar() -> PathBuf {
     std::env::var_os("SystemRoot")
         .map(|r| PathBuf::from(r).join("System32").join("tar.exe"))
         .filter(|p| p.exists())

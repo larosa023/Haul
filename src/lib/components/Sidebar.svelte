@@ -1,7 +1,8 @@
 <script lang="ts">
   import Icon from './Icon.svelte';
-  import { app, ui, counts, saveSettings, type Filter } from '../state.svelte';
+  import { history, app, ui, counts, saveSettings, type Filter } from '../state.svelte';
   import { speed } from '../format.js';
+  import SpeedGraph from './SpeedGraph.svelte';
 
   const FILTERS: { id: Filter; label: string; icon: string }[] = [
     { id: 'all', label: 'All', icon: 'all' },
@@ -52,6 +53,7 @@
   {/if}
 
   <div class="speeds">
+    {#if history.total.some((v) => v > 0)}<div class="spark"><SpeedGraph data={history.total} height={40} dot={false} /></div>{/if}
     <div class="sps">
       <div class="sp" title="Download speed"><Icon name="download" size={14} /><span>{speed(t?.down ?? 0) || '0 B/s'}</span></div>
       <div class="sp" title="Upload speed"><Icon name="upload" size={14} /><span>{speed(t?.up ?? 0) || '0 B/s'}</span></div>
@@ -92,7 +94,9 @@
   .count { font-size: 11.5px; font-weight: 600; min-width: 22px; text-align: center; padding: 1px 6px; border-radius: 9px; background: var(--surface-strong); color: var(--text-2); }
   .spacer { flex: 1; }
   .engine { display: flex; gap: 7px; align-items: center; font-size: 12px; color: var(--warn); padding: 6px 10px; }
-  .speeds { display: flex; align-items: center; gap: 10px; padding: 8px 4px 8px 10px; border-top: 1px solid var(--line); margin-top: 4px; }
+  .speeds { position: relative; display: flex; align-items: center; gap: 10px; padding: 8px 4px 8px 10px; border-top: 1px solid var(--line); margin-top: 4px; }
+  .spark { position: absolute; left: 0; right: 0; bottom: 0; opacity: 0.35; pointer-events: none; }
+  .sps, .alt { position: relative; }
   .sps { flex: 1; display: flex; flex-direction: column; gap: 3px; min-width: 0; }
   .sp { display: flex; align-items: center; gap: 7px; font-size: 12px; color: var(--text-2); font-variant-numeric: tabular-nums; white-space: nowrap; }
   .sp :global(svg) { flex-shrink: 0; }
