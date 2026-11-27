@@ -329,10 +329,13 @@ fn content_findings(path: &Path, name: &str, out: &mut Vec<Finding>) -> Option<u
 /// Programs: is it signed, by whom, and is the signature intact?
 #[cfg(windows)]
 fn signature_findings(path: &Path, out: &mut Vec<Finding>) {
+    use base64::Engine;
     use std::os::windows::process::CommandExt;
-    let script = "$s = Get-AuthenticodeSignature -LiteralPath $env:HAUL_SIG; \"$($s.Status)|$($s.SignerCertificate.Subject)\"";
+    // -EncodedCommand avoids every quoting pitfall; the path comes in through an env variable.
+    let script = "$s = Get-AuthenticodeSignature -LiteralPath $env:HAUL_SIG; [Console]::Out.Write($s.Status.ToString() + '|' + $s.SignerCertificate.Subject)";
+    let utf16: Vec<u8> = script.encode_utf16().flat_map(|c| c.to_le_bytes()).collect();
     let res = std::process::Command::new("powershell.exe")
-        .args(["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-Command", script])
+        .args(["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-EncodedCommand", &base64::engine::general_purpose::STANDARD.encode(utf16)])
         .env("HAUL_SIG", path)
         .creation_flags(0x0800_0000)
         .output();
@@ -345,7 +348,14 @@ fn signature_findings(path: &Path, out: &mut Vec<Finding>) {
         .map(|s| s.trim_matches('"').to_string())
         .unwrap_or_default();
     match status {
-        "Valid" => out.push(f("good", 0, if signer.is_empty() { "Digitally signed, and the signature is intact".to_string() } else { format!("Digitally signed by {signer}, and the signature is intact") })),
+        "Valid" => {
+            // A program from a verified publisher is much less of a worry.
+            for x in out.iter_mut().filter(|x| x.text.contains("is a program or script")) {
+                x.points = 8;
+                x.level = "info".into();
+            }
+            out.push(f("good", 0, if signer.is_empty() { "Digitally signed, and the signature is intact".to_string() } else { format!("Digitally signed by {signer}, and the signature is intact") }));
+        }
         "NotSigned" => out.push(f("warn", 18, "Not digitally signed, so who made it can't be verified")),
         "HashMismatch" => out.push(f("bad", 50, "The signature doesn't match: the program was changed after it was signed")),
         "NotTrusted" | "UnknownError" => out.push(f("warn", 25, if signer.is_empty() { "Signed, but by a certificate Windows doesn't trust".to_string() } else { format!("Signed by {signer}, but Windows doesn't trust that certificate") })),
@@ -706,6 +716,7 @@ mod real {
         let mut v = Vec::new();
         signature_findings(&notepad, &mut v);
         println!("notepad: {v:?}");
+        assert!(v.iter().any(|x| x.level == "good" && x.text.contains("Microsoft")), "signature check failed: {v:?}");
         let dir = std::env::temp_dir().join(format!("haul-safe-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let png = dir.join("a.png");
