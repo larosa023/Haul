@@ -41,7 +41,7 @@
     const list = f ? hits.filter((h) => h.title.toLowerCase().includes(f) || h.source.toLowerCase().includes(f)) : hits.slice();
     const k = sort;
     list.sort((a, b) => {
-      const v = k === 'title' ? a.title.localeCompare(b.title) : k === 'seeders' ? Math.max(a.seeders, -1) - Math.max(b.seeders, -1) || a.downloads - b.downloads : (a[k] as number) - (b[k] as number);
+      const v = k === 'title' ? a.title.localeCompare(b.title) : k === 'seeders' ? Math.max(a.seeders, -1) - Math.max(b.seeders, -1) : (a[k] as number) - (b[k] as number);
       return desc ? -v : v;
     });
     return list;

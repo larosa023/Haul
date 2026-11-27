@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.4.0
+
+- **Torrent search** (sidebar → Search, or `Ctrl+K`). Searches Internet Archive (built in) and any Torznab indexers you add from Prowlarr or Jackett, all at once. Results are merged, de-duplicated and sorted by seeders, with size, age and a seed-health dot; filter by category or text, and download straight away (or through your debrid service). Add sources in Settings → Torrent search.
+- **More debrid services:** AllDebrid, Premiumize and TorBox, alongside Real-Debrid. Each keeps its own key; pick the one Haul uses in Settings → Debrid. File hoster links and torrents work with all four (choosing files before the download starts is Real-Debrid only).
+- **Duplicate warning:** the New download and video windows tell you when you already downloaded a link (with Open / Show it), batches can skip links already in your list, and a link from the browser or clipboard that you already have opens the New download window so you see the warning.
+- **Download tracking styles:** Glow, Classic, Striped, Aurora, Blocks, Minimal or Neon, with live previews in Settings → Appearance. They apply to the list, the connection map and the mini window.
+
 ## 0.3.2
 
 - Safety score: the "digitally signed by…" check for programs now works on every PC (it could fail when PowerShell 7 is installed). Programs signed by a verified publisher score higher.

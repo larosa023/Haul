@@ -24,6 +24,9 @@ Haul does what IDM, qBittorrent and a video downloader do, in a single small app
   - Haul fetches **yt-dlp and ffmpeg** on first use (not bundled), checks their SHA-256 against the releases, and keeps yt-dlp updated by itself, since sites break older versions often.
 - **Safety score** for every download, A to F, with the reasons: the link is checked when you paste it (encryption, look-alike or scam-prone sites, disguised names like `invoice.pdf.exe`), and the file when it finishes (does it match its name, is a program signed and by whom, what's inside archives, a Windows Defender scan, and optionally VirusTotal by hash). Downloads are marked as from the internet so SmartScreen checks them.
 - **Live view**: a speed graph with peak and average, and a map of each connection filling its part of the file. Speeds in MB/s or Mbps.
+- **Torrent search** (`Ctrl+K`): Internet Archive built in, plus your own Torznab indexers from Prowlarr or Jackett, searched at once and sorted by seeders.
+- **Duplicate warnings** when a link is already downloaded or in your list.
+- **Download tracking styles**: Glow, Classic, Striped, Aurora, Blocks, Minimal or Neon.
 - **Batch downloads**: paste many links, or a pattern like `file[001-100].zip` (also `[a-z]` and steps like `[0-100:5]`).
 - **Site grabber**: point it at a page and it lists every file the page links to, with sizes. Filter by type, size or name, then pick what to download.
 - **Hugging Face models and datasets**: paste a link or `org/name`, pick the files (one click for just the `.safetensors` or one GGUF), and each downloads over several connections and is checked against its SHA-256. Add a token in Settings for gated or private models.
@@ -33,7 +36,7 @@ Haul does what IDM, qBittorrent and a video downloader do, in a single small app
   - **Seeding limits** by ratio and time, globally or per torrent, and a limit on how many torrents seed at once.
   - **DHT, PEX, encryption** (Prefer / Require / Off, compatible with qBittorrent, Transmission and uTorrent), **UPnP and NAT-PMP** port mapping, and **IP blocklists** (eMule .dat, PeerGuardian .p2p, plain or .gz, from a link or a file).
   - **Bind torrents to a network adapter** (your VPN). If that adapter goes down, torrents stop until it's back.
-- **Real-Debrid.** Connect your account in **Settings → Debrid** with your [API key](https://real-debrid.com/apitoken) (stored encrypted for your Windows account).
+- **Real-Debrid / AllDebrid / Premiumize / TorBox.** Connect your account in **Settings → Debrid** with your [API key](https://real-debrid.com/apitoken) (stored encrypted for your Windows account).
   - **File hoster links** (1fichier, Rapidgator, Mega and the other hosters Real-Debrid supports) download at premium speed with Haul's multiple connections. Expired links are renewed automatically.
   - **Torrents through Real-Debrid**: Real-Debrid downloads the torrent on its servers, then Haul fetches the files over HTTPS (no seeding, no torrent traffic from your PC). Pick the files, follow Real-Debrid's progress in the list, and the files land in the torrent's folders. Off, Ask each time, or Always.
 - **One list for everything**: name, size, progress, speed, time left and status, with **Downloading, Seeding, Completed, Paused and Errors** filters and search. The list only draws what's on screen, so hundreds of torrents stay smooth.

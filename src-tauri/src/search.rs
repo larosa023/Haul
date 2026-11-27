@@ -111,7 +111,8 @@ pub async fn search(query: &str, cat: &str) -> Results {
             }
         }
     }
-    deduped.sort_by(|a, b| b.seeders.cmp(&a.seeders).then(b.downloads.cmp(&a.downloads)));
+    // Most seeders first; sources that don't count seeders keep their own relevance order.
+    deduped.sort_by(|a, b| b.seeders.cmp(&a.seeders));
     out.hits = deduped;
     out
 }
@@ -123,7 +124,10 @@ fn infohash(link: &str) -> Option<String> {
 }
 
 async fn archive(q: &str, cat: &str) -> Result<Vec<Hit>, String> {
-    let query = format!("({q}) AND {}", archive_type(cat));
+    // Match the title (or subjects), not every word of long descriptions; keep the Archive's
+    // own relevance order.
+    let words = q.replace(['(', ')', ':', '"'], " ");
+    let query = format!("(title:({words}) OR subject:({words})) AND {}", archive_type(cat));
     let r = crate::http::client()
         .get("https://archive.org/advancedsearch.php")
         .query(&[
@@ -136,7 +140,6 @@ async fn archive(q: &str, cat: &str) -> Result<Vec<Hit>, String> {
             ("fl[]", "publicdate"),
             ("rows", "60"),
             ("output", "json"),
-            ("sort[]", "downloads desc"),
         ])
         .timeout(Duration::from_secs(20))
         .send()
