@@ -340,7 +340,10 @@ fn signature_findings(path: &Path, out: &mut Vec<Finding>) {
         .creation_flags(0x0800_0000)
         .output();
     let Ok(o) = res else { return };
-    let text = String::from_utf8_lossy(&o.stdout).trim().to_string();
+    let text = String::from_utf8_lossy(&o.stdout).trim().trim_start_matches('\u{FEFF}').to_string();
+    if cfg!(test) {
+        println!("powershell: code {:?} out {text:?} err {:?}", o.status.code(), String::from_utf8_lossy(&o.stderr));
+    }
     let (status, subject) = text.split_once('|').unwrap_or((&text, ""));
     let signer = subject
         .split(',')
