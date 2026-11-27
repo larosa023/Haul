@@ -130,6 +130,8 @@ export interface Settings {
   debridService: DebridService;
   debridKeys: Record<string, string>;
   searchArchive: boolean;
+  flaresolverrAuto: boolean;
+  flaresolverrPath: string;
   searchIndexers: { name: string; url: string; key: string; enabled: boolean }[];
   autoUpdate: boolean;
   channel: 'stable' | 'beta';
@@ -381,6 +383,7 @@ export const api = {
   debridConnect: (key: string, service: DebridService) => call<DebridState>('debrid_connect', { key, service }),
   debridUse: (service: DebridService) => call<DebridState>('debrid_use', { service }),
   debridDisconnect: (service?: DebridService) => call<Settings>('debrid_disconnect', { service }),
+  flaresolverrStatus: () => call<{ running: boolean; path: string }>('flaresolverr_status'),
   searchTorrents: (query: string, category: string) => call<SearchResults>('search_torrents', { query, category }),
   searchAdd: (link: string, debrid?: boolean) => call<{ id: number; existing: boolean }>('search_add', { link, debrid }),
   searchAddIndexer: (indexer: { name: string; url: string; key: string }) => call<Settings>('search_add_indexer', { indexer }),

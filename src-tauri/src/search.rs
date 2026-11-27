@@ -60,6 +60,10 @@ fn archive_type(cat: &str) -> &'static str {
 }
 
 fn cat_name(n: u64) -> String {
+    // PC games live under 4050 ("PC/Games"); consoles under 1000.
+    if n == 4050 {
+        return "Games".into();
+    }
     match n / 1000 {
         1 => "Games",
         2 => "Movies",
@@ -78,6 +82,9 @@ pub async fn search(query: &str, cat: &str) -> Results {
         return Results::default();
     }
     let s = settings::get();
+    if s.search_indexers.iter().any(|i| i.enabled) {
+        crate::flaresolverr::ensure().await;
+    }
     let mut jobs: Vec<futures_util::future::BoxFuture<'static, (String, Result<Vec<Hit>, String>)>> = Vec::new();
     if s.search_archive {
         let (q, c) = (q.to_string(), cat.to_string());
@@ -245,7 +252,18 @@ pub fn parse_torznab(xml: &str, source: &str) -> Result<Vec<Hit>, String> {
         let size = text("size").parse().ok().or_else(|| attr("size").and_then(|s| s.parse().ok())).or_else(|| enclosure.and_then(|e| e.attribute("length")).and_then(|l| l.parse().ok())).unwrap_or(0);
         let seeders: i64 = attr("seeders").and_then(|s| s.parse().ok()).unwrap_or(-1);
         let peers: i64 = attr("peers").and_then(|s| s.parse().ok()).unwrap_or(-1);
-        let cat = attr("category").and_then(|c| c.parse::<u64>().ok()).or_else(|| text("category").parse().ok()).map(cat_name).unwrap_or_default();
+        // Items often list several categories (4000 and 4050): prefer the most specific.
+        let mut cats: Vec<u64> = item
+            .children()
+            .filter(|c| c.tag_name().name() == "attr" && c.attribute("name") == Some("category"))
+            .filter_map(|c| c.attribute("value").and_then(|v| v.parse().ok()))
+            .collect();
+        cats.extend(item.children().filter(|c| c.has_tag_name("category")).filter_map(|c| c.text().and_then(|t| t.trim().parse::<u64>().ok())));
+        let cat = if cats.contains(&4050) || cats.iter().any(|c| (1000..2000).contains(c)) {
+            "Games".to_string()
+        } else {
+            cats.iter().filter(|c| **c < 100_000).max_by_key(|c| *c % 1000 != 0).copied().map(cat_name).unwrap_or_default()
+        };
         let info = [text("comments"), text("guid")].into_iter().find(|u| u.starts_with("http")).unwrap_or_default();
         out.push(Hit {
             title: text("title"),
@@ -363,6 +381,8 @@ mod tests {
         assert_eq!(h[0].source, "LinuxTracker");
         assert!(h[0].link.starts_with("magnet:"));
         assert_eq!(h[0].category, "Software");
+        let games = xml.replace(r#"<torznab:attr name="category" value="4000"/>"#, r#"<torznab:attr name="category" value="4000"/><torznab:attr name="category" value="4050"/>"#);
+        assert_eq!(parse_torznab(&games, "x").unwrap()[0].category, "Games");
         assert_eq!(h[0].size, 6114519040);
         assert!(h[0].published > 0);
         assert_eq!(h[1].seeders, -1);

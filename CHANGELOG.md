@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.4.2
+
+- Torrent search: PC and console games are labelled **Games** (they showed as Software).
+- FlareSolverr starts by itself: before a search Haul checks it's running and, if not, starts it hidden (no window). Haul finds it in your Startup folder or the usual unzip places, or you can point to it in Settings → Torrent search.
+
 ## 0.4.1
 
 - Torrent search: when a site says it's getting too many searches (429), Haul waits and tries again by itself, and otherwise explains it in plain words.

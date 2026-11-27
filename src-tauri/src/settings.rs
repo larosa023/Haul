@@ -154,6 +154,9 @@ pub struct Settings {
     // Torrent search
     pub search_archive: bool,
     pub search_indexers: Vec<Indexer>,
+    /// Start FlareSolverr (hidden) before searching if it isn't running.
+    pub flaresolverr_auto: bool,
+    pub flaresolverr_path: String,
     // Debrid
     pub debrid_enabled: bool,
     /// The API key, encrypted for this Windows account (see secret.rs).
@@ -262,6 +265,8 @@ impl Default for Settings {
             vt_key: String::new(),
             search_archive: true,
             search_indexers: Vec::new(),
+            flaresolverr_auto: true,
+            flaresolverr_path: String::new(),
             debrid_enabled: true,
             debrid_key: String::new(),
             debrid_service: "realdebrid".into(),

@@ -121,6 +121,18 @@
   }
 
   // ---- torrent search sources
+  let flare = $state<{ running: boolean; path: string } | null>(null);
+  $effect(() => {
+    if (ui.settingsTab === 'search' && isTauri) void api.flaresolverrStatus().then((f) => (flare = f)).catch(() => {});
+  });
+  async function pickFlare() {
+    const { open } = await import('@tauri-apps/plugin-dialog');
+    const p = await open({ filters: [{ name: 'flaresolverr.exe', extensions: ['exe'] }] });
+    if (typeof p === 'string') {
+      set('flaresolverrPath', p);
+      flare = await api.flaresolverrStatus();
+    }
+  }
   let ixName = $state('');
   let ixUrl = $state('');
   let ixKey = $state('');
@@ -708,6 +720,15 @@
               </div>
             </SettingRow>
           {/each}
+        </div>
+        <h3>FlareSolverr</h3>
+        <div class="group">
+          <SettingRow title="Start FlareSolverr when searching" description={flare?.path ? `${flare.running ? 'Running' : 'Not running right now'} · ${flare.path}` : 'Lets Prowlarr get past Cloudflare checks. Haul starts it hidden (no window) before a search if it isn’t already running.'} wide>
+            <div class="pathrow">
+              {#if !flare?.path}<button class="btn sm" onclick={pickFlare}>Find flaresolverr.exe…</button>{:else}<button class="btn sm ghost" onclick={pickFlare}>Change…</button>{/if}
+              <Switch checked={s.flaresolverrAuto} label="Start FlareSolverr when searching" onchange={(v) => set('flaresolverrAuto', v)} />
+            </div>
+          </SettingRow>
         </div>
         <h3>Add a Torznab indexer</h3>
         <div class="group connect">

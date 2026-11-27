@@ -834,3 +834,8 @@ pub fn search_toggle_indexer(url: String, enabled: bool) -> Settings {
     engine::emit("settings", s.clone());
     s
 }
+
+#[tauri::command]
+pub async fn flaresolverr_status() -> crate::flaresolverr::Status {
+    crate::flaresolverr::status().await
+}
