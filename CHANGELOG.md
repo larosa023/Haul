@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.3.2
+
+- Safety score: the "digitally signed by…" check for programs now works on every PC (it could fail when PowerShell 7 is installed). Programs signed by a verified publisher score higher.
+
 ## 0.3.1
 
 - **Safety score.** Every download gets a grade from A (looks safe) to F (likely dangerous), with the reasons listed under it.

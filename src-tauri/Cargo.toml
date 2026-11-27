@@ -1,6 +1,6 @@
 [package]
 name = "haul"
-version = "0.3.1"
+version = "0.3.2"
 description = "A clean download manager and torrent client for Windows"
 edition = "2021"
 rust-version = "1.80"
