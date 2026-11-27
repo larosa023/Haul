@@ -36,7 +36,7 @@ Haul does what IDM, qBittorrent and a video downloader do, in a single small app
   - **Seeding limits** by ratio and time, globally or per torrent, and a limit on how many torrents seed at once.
   - **DHT, PEX, encryption** (Prefer / Require / Off, compatible with qBittorrent, Transmission and uTorrent), **UPnP and NAT-PMP** port mapping, and **IP blocklists** (eMule .dat, PeerGuardian .p2p, plain or .gz, from a link or a file).
   - **Bind torrents to a network adapter** (your VPN). If that adapter goes down, torrents stop until it's back.
-- **Real-Debrid / AllDebrid / Premiumize / TorBox.** Connect your account in **Settings → Debrid** with your [API key](https://real-debrid.com/apitoken) (stored encrypted for your Windows account).
+- **Real-Debrid / AllDebrid / Premiumize / TorBox.** Connect your account in **Settings → Debrid** with your API key (stored encrypted for your Windows account).
   - **File hoster links** (1fichier, Rapidgator, Mega and the other hosters Real-Debrid supports) download at premium speed with Haul's multiple connections. Expired links are renewed automatically.
   - **Torrents through Real-Debrid**: Real-Debrid downloads the torrent on its servers, then Haul fetches the files over HTTPS (no seeding, no torrent traffic from your PC). Pick the files, follow Real-Debrid's progress in the list, and the files land in the torrent's folders. Off, Ask each time, or Always.
 - **One list for everything**: name, size, progress, speed, time left and status, with **Downloading, Seeding, Completed, Paused and Errors** filters and search. The list only draws what's on screen, so hundreds of torrents stay smooth.
