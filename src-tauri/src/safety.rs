@@ -337,6 +337,8 @@ fn signature_findings(path: &Path, out: &mut Vec<Finding>) {
     let res = std::process::Command::new("powershell.exe")
         .args(["-NoProfile", "-NonInteractive", "-ExecutionPolicy", "Bypass", "-EncodedCommand", &base64::engine::general_purpose::STANDARD.encode(utf16)])
         .env("HAUL_SIG", path)
+        // A PSModulePath inherited from PowerShell 7 stops Windows PowerShell loading its own modules.
+        .env_remove("PSModulePath")
         .creation_flags(0x0800_0000)
         .output();
     let Ok(o) = res else { return };
