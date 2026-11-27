@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.4.1
+
+- Torrent search: when a site says it's getting too many searches (429), Haul waits and tries again by itself, and otherwise explains it in plain words.
+
 ## 0.4.0
 
 - **Torrent search** (sidebar → Search, or `Ctrl+K`). Searches Internet Archive (built in) and any Torznab indexers you add from Prowlarr or Jackett, all at once. Results are merged, de-duplicated and sorted by seeders, with size, age and a seed-health dot; filter by category or text, and download straight away (or through your debrid service). Add sources in Settings → Torrent search.

@@ -1,7 +1,7 @@
 {
   "name": "haul",
   "private": true,
-  "version": "0.4.0",
+  "version": "0.4.1",
   "description": "A clean download manager and torrent client for Windows.",
   "type": "module",
   "scripts": {

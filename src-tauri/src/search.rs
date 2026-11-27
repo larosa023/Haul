@@ -194,15 +194,29 @@ async fn torznab(ix: &Indexer, q: &str, cat: &str) -> Result<Vec<Hit>, String> {
     if !c.is_empty() {
         query.push(("cat", c.into()));
     }
-    let r = crate::http::client()
-        .get(api_url(ix))
-        .query(&query)
-        .timeout(Duration::from_secs(25))
-        .send()
-        .await
-        .map_err(|e| if e.is_timeout() { "took too long to answer".to_string() } else { format!("couldn't be reached ({})", e.without_url()) })?;
-    if !r.status().is_success() {
-        return Err(format!("answered {}", r.status()));
+    // Sites rate-limit busy searches (429): wait and try again, up to twice.
+    let mut tries = 0;
+    let r = loop {
+        let r = crate::http::client()
+            .get(api_url(ix))
+            .query(&query)
+            .timeout(Duration::from_secs(25))
+            .send()
+            .await
+            .map_err(|e| if e.is_timeout() { "took too long to answer".to_string() } else { format!("couldn't be reached ({}). Is Prowlarr running?", e.without_url()) })?;
+        if r.status().as_u16() == 429 && tries < 2 {
+            tries += 1;
+            let wait = r.headers().get("retry-after").and_then(|v| v.to_str().ok()).and_then(|v| v.parse::<u64>().ok()).unwrap_or(3).clamp(1, 8);
+            tokio::time::sleep(Duration::from_secs(wait)).await;
+            continue;
+        }
+        break r;
+    };
+    match r.status().as_u16() {
+        200..=299 => {}
+        429 => return Err("is limiting searches right now (too many in a short time); try again in a minute".into()),
+        401 | 403 => return Err("didn't accept the API key".into()),
+        s => return Err(format!("answered with an error ({s})")),
     }
     let text = r.text().await.map_err(|e| e.to_string())?;
     parse_torznab(&text, &ix.name)
