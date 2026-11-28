@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.6
+
+- Prowlarr is built in. Haul finds Prowlarr on your PC, reads its address and API key by itself, starts it hidden when you search (no window or browser tab to keep open) and searches every site you've added to it in one go. No Torznab links or keys to copy any more; links added by hand to the same Prowlarr are skipped so nothing is searched twice.
+- Sites Prowlarr has paused after errors are re-tested before each search, so they come back on their own.
+- Haul also finds FlareSolverr one folder deeper in Downloads, Desktop and Documents.
+
 ## 0.4.5
 
 - Torrent search: while a search runs, the previous results fade out and Haul says what it's searching for (and why when it's slow), so old results can't be mistaken for new ones. The result count says which search it's for.

@@ -157,6 +157,9 @@ pub struct Settings {
     /// Start FlareSolverr (hidden) before searching if it isn't running.
     pub flaresolverr_auto: bool,
     pub flaresolverr_path: String,
+    /// Search through Prowlarr automatically (found on this PC, started hidden when needed).
+    pub prowlarr_auto: bool,
+    pub prowlarr_path: String,
     // Debrid
     pub debrid_enabled: bool,
     /// The API key, encrypted for this Windows account (see secret.rs).
@@ -267,6 +270,8 @@ impl Default for Settings {
             search_indexers: Vec::new(),
             flaresolverr_auto: true,
             flaresolverr_path: String::new(),
+            prowlarr_auto: true,
+            prowlarr_path: String::new(),
             debrid_enabled: true,
             debrid_key: String::new(),
             debrid_service: "realdebrid".into(),

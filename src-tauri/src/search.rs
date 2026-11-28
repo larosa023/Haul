@@ -1,5 +1,6 @@
-//! Torrent search: Internet Archive (built in) and any Torznab indexers the user adds
-//! (Prowlarr, Jackett, or a site's own Torznab feed). All sources are asked at once.
+//! Torrent search: Internet Archive (built in), Prowlarr (found and started automatically,
+//! see prowlarr.rs) and any Torznab indexers the user adds (Jackett, or a site's own feed).
+//! All sources are asked at once.
 
 use futures_util::future::join_all;
 use serde::{Deserialize, Serialize};
@@ -59,7 +60,7 @@ fn archive_type(cat: &str) -> &'static str {
     }
 }
 
-fn cat_name(n: u64) -> String {
+pub(crate) fn cat_name(n: u64) -> String {
     // PC games live under 4050 ("PC/Games"); consoles under 1000.
     if n == 4050 {
         return "Games".into();
@@ -82,7 +83,8 @@ pub async fn search(query: &str, cat: &str) -> Results {
         return Results::default();
     }
     let s = settings::get();
-    if s.search_indexers.iter().any(|i| i.enabled) {
+    let prowlarr_found = s.prowlarr_auto && crate::prowlarr::conn().is_some();
+    if prowlarr_found || s.search_indexers.iter().any(|i| i.enabled) {
         crate::flaresolverr::ensure().await;
     }
     let mut jobs: Vec<futures_util::future::BoxFuture<'static, (String, Result<Vec<Hit>, String>)>> = Vec::new();
@@ -90,7 +92,19 @@ pub async fn search(query: &str, cat: &str) -> Results {
         let (q, c) = (q.to_string(), cat.to_string());
         jobs.push(Box::pin(async move { ("Internet Archive".to_string(), archive(&q, &c).await) }));
     }
-    for ix in s.search_indexers.into_iter().filter(|i| i.enabled && !i.url.trim().is_empty()) {
+    let px = if prowlarr_found { crate::prowlarr::ensure().await } else { None };
+    if let Some(conn) = px.clone() {
+        let (q, c) = (q.to_string(), cat.to_string());
+        jobs.push(Box::pin(async move { ("Prowlarr".to_string(), crate::prowlarr::search(&conn, &q, &c).await) }));
+    } else if prowlarr_found {
+        jobs.push(Box::pin(async { ("Prowlarr".to_string(), Err("didn't start (open it once from the Start menu, then search again)".to_string())) }));
+    }
+    // Links added by hand to the same Prowlarr are covered by the built-in search.
+    let same_prowlarr = |ix: &Indexer| match (&px, prowlarr_base(ix)) {
+        (Some(c), Some(b)) => b.replace("localhost", "127.0.0.1").trim_end_matches('/') == c.base.trim_end_matches('/'),
+        _ => false,
+    };
+    for ix in s.search_indexers.into_iter().filter(|i| i.enabled && !i.url.trim().is_empty()).filter(|i| !same_prowlarr(i)) {
         let (q, c) = (q.to_string(), cat.to_string());
         jobs.push(Box::pin(async move {
             let name = ix.name.clone();

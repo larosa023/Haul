@@ -26,6 +26,13 @@ pub fn find() -> Option<PathBuf> {
             tries.push(base.join("flaresolverr").join("flaresolverr.exe"));
             tries.push(base.join("flaresolverr_windows_x64").join("flaresolverr").join("flaresolverr.exe"));
             tries.push(base.join("FlareSolverr").join("flaresolverr.exe"));
+            // One folder deeper too (e.g. Downloads\Some folder\flaresolverr).
+            if !d.is_empty() {
+                for sub in std::fs::read_dir(&base).into_iter().flatten().flatten().map(|e| e.path()).filter(|p| p.is_dir()).take(200) {
+                    tries.push(sub.join("flaresolverr").join("flaresolverr.exe"));
+                    tries.push(sub.join("flaresolverr.exe"));
+                }
+            }
         }
     }
     for k in ["LOCALAPPDATA", "ProgramFiles", "ProgramData"] {

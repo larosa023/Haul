@@ -24,7 +24,7 @@ Haul does what IDM, qBittorrent and a video downloader do, in a single small app
   - Haul fetches **yt-dlp and ffmpeg** on first use (not bundled), checks their SHA-256 against the releases, and keeps yt-dlp updated by itself, since sites break older versions often.
 - **Safety score** for every download, A to F, with the reasons: the link is checked when you paste it (encryption, look-alike or scam-prone sites, disguised names like `invoice.pdf.exe`), and the file when it finishes (does it match its name, is a program signed and by whom, what's inside archives, a Windows Defender scan, and optionally VirusTotal by hash). Downloads are marked as from the internet so SmartScreen checks them.
 - **Live view**: a speed graph with peak and average, and a map of each connection filling its part of the file. Speeds in MB/s or Mbps.
-- **Torrent search** (`Ctrl+K`): Internet Archive built in, plus your own Torznab indexers from Prowlarr or Jackett, searched at once and sorted by seeders.
+- **Torrent search** (`Ctrl+K`): Internet Archive built in, plus every site in Prowlarr (found, connected and started automatically, with FlareSolverr for Cloudflare-protected sites) and any Jackett or Torznab feeds, searched at once and sorted by seeders.
 - **Duplicate warnings** when a link is already downloaded or in your list.
 - **Download tracking styles**: Glow, Classic, Striped, Aurora, Blocks, Minimal or Neon.
 - **Batch downloads**: paste many links, or a pattern like `file[001-100].zip` (also `[a-z]` and steps like `[0-100:5]`).

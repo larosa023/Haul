@@ -4,7 +4,7 @@
   import Icon from '../lib/components/Icon.svelte';
   import SettingRow from '../lib/components/SettingRow.svelte';
   import Switch from '../lib/components/Switch.svelte';
-  import { api, isTauri, type Adapter, type DebridService, type DebridState, type MediaOptions, type Rule, type Settings } from '../lib/api';
+  import { api, isTauri, type Adapter, type DebridService, type DebridState, type MediaOptions, type ProwlarrStatus, type Rule, type Settings } from '../lib/api';
   import { app, ui, saveSettings, toast, errorText } from '../lib/state.svelte';
   import { THEMES, ACCENT_SWATCHES, cssVars, effectiveTheme, resolveAccent, themeToJson, type ThemeDef } from '../lib/themecore.js';
   import { themes, allThemes, reloadThemes, findTheme } from '../lib/theme.svelte';
@@ -126,9 +126,29 @@
 
   // ---- torrent search sources
   let flare = $state<{ running: boolean; path: string } | null>(null);
+  let prow = $state<ProwlarrStatus | null>(null);
+  let prowBusy = $state(false);
   $effect(() => {
-    if (ui.settingsTab === 'search' && isTauri) void api.flaresolverrStatus().then((f) => (flare = f)).catch(() => {});
+    if (ui.settingsTab === 'search' && isTauri) {
+      void api.flaresolverrStatus().then((f) => (flare = f)).catch(() => {});
+      void api.prowlarrStatus().then((p) => (prow = p)).catch(() => {});
+    }
   });
+  async function startProwlarr() {
+    prowBusy = true;
+    try {
+      prow = await api.prowlarrStart();
+      if (!prow.running) toast('Prowlarr didn’t start. Open it once from the Start menu, then try again.', 'error');
+    } finally {
+      prowBusy = false;
+    }
+  }
+  const prowText = $derived(
+    !prow ? 'Checking…'
+    : !prow.found ? 'Not installed. Install Prowlarr to search the sites you add to it; Haul handles the rest.'
+    : prow.running ? `Connected · ${prow.sites} site${prow.sites === 1 ? '' : 's'} · Haul starts it hidden when you search`
+    : 'Installed · not running right now. Haul starts it hidden when you search.'
+  );
   async function pickFlare() {
     const { open } = await import('@tauri-apps/plugin-dialog');
     const p = await open({ filters: [{ name: 'flaresolverr.exe', extensions: ['exe'] }] });
@@ -717,7 +737,7 @@
             <Switch checked={s.searchArchive} label="Internet Archive" onchange={(v) => set('searchArchive', v)} />
           </SettingRow>
           {#each s.searchIndexers as ix (ix.url)}
-            <SettingRow title={ix.name} description={ix.url}>
+            <SettingRow title={ix.name} description={prow?.found && s.prowlarrAuto && /\/\/(localhost|127\.0\.0\.1)[:/].*\/\d+\/api/.test(ix.url) ? 'Not needed any more: “Search with Prowlarr” below covers it. You can remove it.' : ix.url}>
               <div class="pathrow">
                 <button class="icon-btn" title="Remove" onclick={async () => (app.settings = await api.searchRemoveIndexer(ix.url))}><Icon name="trash" size={14} /></button>
                 <Switch checked={ix.enabled} label={ix.name} onchange={async (v) => (app.settings = await api.searchToggleIndexer(ix.url, v))} />
@@ -725,6 +745,22 @@
             </SettingRow>
           {/each}
         </div>
+        <h3>Prowlarr</h3>
+        <div class="group">
+          <SettingRow title="Search with Prowlarr" description={prowText} wide>
+            <div class="pathrow">
+              {#if prow && !prow.found}
+                <button class="btn sm" onclick={() => api.openLink('https://prowlarr.com/#downloads-v1-windows')}>Get Prowlarr</button>
+              {:else if prow?.running}
+                <button class="btn sm ghost" onclick={() => api.openLink(prow!.address)}>Add sites…</button>
+              {:else if prow}
+                <button class="btn sm" disabled={prowBusy} onclick={startProwlarr}>{#if prowBusy}<span class="spinner"></span>{/if}Start now</button>
+              {/if}
+              <Switch checked={s.prowlarrAuto} label="Search with Prowlarr" onchange={(v) => set('prowlarrAuto', v)} />
+            </div>
+          </SettingRow>
+        </div>
+        <p class="faint small">No links or keys to copy: Haul reads them from Prowlarr itself and searches every site you’ve added there. Sites Prowlarr has paused after errors are re-tested automatically.</p>
         <h3>FlareSolverr</h3>
         <div class="group">
           <SettingRow title="Start FlareSolverr when searching" description={flare?.path ? `${flare.running ? 'Running' : 'Not running right now'} · ${flare.path}` : 'Lets Prowlarr get past Cloudflare checks. Haul starts it hidden (no window) before a search if it isn’t already running.'} wide>
@@ -734,9 +770,9 @@
             </div>
           </SettingRow>
         </div>
-        <h3>Add a Torznab indexer</h3>
+        <h3>Other sources (optional)</h3>
         <div class="group connect">
-          <p class="small">Torznab is the standard feed that <button class="link" onclick={() => api.openLink('https://prowlarr.com')}>Prowlarr</button> and <button class="link" onclick={() => api.openLink('https://github.com/Jackett/Jackett')}>Jackett</button> provide for the sites you add to them. In Prowlarr, open an indexer and copy its Torznab URL (like <span class="mono">http://localhost:9696/1/api</span>) and your API key from Settings › General. In Jackett, use <strong>Copy Torznab Feed</strong> (or the “All” feed) and the API key at the top.</p>
+          <p class="small">Prowlarr above needs nothing here. To add <button class="link" onclick={() => api.openLink('https://github.com/Jackett/Jackett')}>Jackett</button> or another Torznab feed, paste its feed URL (Jackett: <strong>Copy Torznab Feed</strong>, or the “All” feed) and the API key at the top of Jackett’s page.</p>
           <div class="ixform">
             <input class="input" bind:value={ixName} placeholder="Name (optional)" spellcheck="false" />
             <input class="input mono" bind:value={ixUrl} placeholder="Torznab URL" spellcheck="false" />

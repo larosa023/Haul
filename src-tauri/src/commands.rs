@@ -836,6 +836,16 @@ pub fn search_toggle_indexer(url: String, enabled: bool) -> Settings {
 }
 
 #[tauri::command]
+pub async fn prowlarr_status() -> crate::prowlarr::Status {
+    crate::prowlarr::status().await
+}
+
+#[tauri::command]
+pub async fn prowlarr_start() -> crate::prowlarr::Status {
+    crate::prowlarr::start().await
+}
+
+#[tauri::command]
 pub async fn flaresolverr_status() -> crate::flaresolverr::Status {
     crate::flaresolverr::status().await
 }

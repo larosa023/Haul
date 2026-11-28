@@ -132,6 +132,8 @@ export interface Settings {
   searchArchive: boolean;
   flaresolverrAuto: boolean;
   flaresolverrPath: string;
+  prowlarrAuto: boolean;
+  prowlarrPath: string;
   searchIndexers: { name: string; url: string; key: string; enabled: boolean }[];
   autoUpdate: boolean;
   channel: 'stable' | 'beta';
@@ -383,6 +385,8 @@ export const api = {
   debridConnect: (key: string, service: DebridService) => call<DebridState>('debrid_connect', { key, service }),
   debridUse: (service: DebridService) => call<DebridState>('debrid_use', { service }),
   debridDisconnect: (service?: DebridService) => call<Settings>('debrid_disconnect', { service }),
+  prowlarrStatus: () => call<ProwlarrStatus>('prowlarr_status'),
+  prowlarrStart: () => call<ProwlarrStatus>('prowlarr_start'),
   flaresolverrStatus: () => call<{ running: boolean; path: string }>('flaresolverr_status'),
   searchTorrents: (query: string, category: string) => call<SearchResults>('search_torrents', { query, category }),
   searchAdd: (link: string, debrid?: boolean) => call<{ id: number; existing: boolean }>('search_add', { link, debrid }),
@@ -424,3 +428,10 @@ export const api = {
   setBackdrop: (kind: string, dark: boolean) => call<void>('set_backdrop', { kind, dark }),
   setNativeFrame: (native: boolean) => call<void>('set_native_frame', { native }),
 };
+
+export interface ProwlarrStatus {
+  found: boolean;
+  running: boolean;
+  sites: number;
+  address: string;
+}

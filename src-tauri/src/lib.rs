@@ -6,6 +6,7 @@ mod debrid;
 mod secret;
 mod engine;
 mod flaresolverr;
+mod prowlarr;
 mod extract;
 mod ftp;
 mod grab;
@@ -301,6 +302,8 @@ pub fn run() {
             commands::debrid_use,
             commands::search_torrents,
             commands::flaresolverr_status,
+            commands::prowlarr_status,
+            commands::prowlarr_start,
             commands::search_add,
             commands::search_add_indexer,
             commands::search_remove_indexer,
