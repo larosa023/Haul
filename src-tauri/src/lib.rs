@@ -304,6 +304,7 @@ pub fn run() {
             commands::flaresolverr_status,
             commands::prowlarr_status,
             commands::prowlarr_start,
+            commands::prowlarr_open,
             commands::search_add,
             commands::search_add_indexer,
             commands::search_remove_indexer,

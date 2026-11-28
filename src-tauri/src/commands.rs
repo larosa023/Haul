@@ -840,6 +840,13 @@ pub async fn prowlarr_status() -> crate::prowlarr::Status {
     crate::prowlarr::status().await
 }
 
+/// Opens Prowlarr's own page (address from its config, always on this PC).
+#[tauri::command]
+pub async fn prowlarr_open() -> R<()> {
+    let c = crate::prowlarr::ensure().await.or_else(crate::prowlarr::conn).ok_or("Prowlarr isn't installed")?;
+    tauri_plugin_opener::open_url(c.base.replace("127.0.0.1", "localhost"), None::<&str>).map_err(|e| e.to_string())
+}
+
 #[tauri::command]
 pub async fn prowlarr_start() -> crate::prowlarr::Status {
     crate::prowlarr::start().await

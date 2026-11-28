@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.4.7
+
+- Settings → Torrent search: **Add sites…** opens Prowlarr's page again (the click did nothing because Haul only opened https links). It starts Prowlarr first if it isn't running.
+
 ## 0.4.6
 
 - Prowlarr is built in. Haul finds Prowlarr on your PC, reads its address and API key by itself, starts it hidden when you search (no window or browser tab to keep open) and searches every site you've added to it in one go. No Torznab links or keys to copy any more; links added by hand to the same Prowlarr are skipped so nothing is searched twice.

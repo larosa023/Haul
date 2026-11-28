@@ -387,6 +387,7 @@ export const api = {
   debridDisconnect: (service?: DebridService) => call<Settings>('debrid_disconnect', { service }),
   prowlarrStatus: () => call<ProwlarrStatus>('prowlarr_status'),
   prowlarrStart: () => call<ProwlarrStatus>('prowlarr_start'),
+  prowlarrOpen: () => call<void>('prowlarr_open'),
   flaresolverrStatus: () => call<{ running: boolean; path: string }>('flaresolverr_status'),
   searchTorrents: (query: string, category: string) => call<SearchResults>('search_torrents', { query, category }),
   searchAdd: (link: string, debrid?: boolean) => call<{ id: number; existing: boolean }>('search_add', { link, debrid }),

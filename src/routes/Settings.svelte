@@ -752,7 +752,7 @@
               {#if prow && !prow.found}
                 <button class="btn sm" onclick={() => api.openLink('https://prowlarr.com/#downloads-v1-windows')}>Get Prowlarr</button>
               {:else if prow?.running}
-                <button class="btn sm ghost" onclick={() => api.openLink(prow!.address)}>Add sites…</button>
+                <button class="btn sm ghost" onclick={() => api.prowlarrOpen().catch((e) => toast(String(e), 'error'))}>Add sites…</button>
               {:else if prow}
                 <button class="btn sm" disabled={prowBusy} onclick={startProwlarr}>{#if prowBusy}<span class="spinner"></span>{/if}Start now</button>
               {/if}
