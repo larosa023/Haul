@@ -175,6 +175,8 @@
     const text = dt.getData('text/uri-list') || dt.getData('text/plain');
     if (text && !dt.files.length) ui.dialog = { kind: 'add', url: text.split('\n')[0].trim() };
   }
+  const ACTIVE = ['downloading', 'queued', 'metadata', 'checking'];
+  const busy = $derived(app.order.some((id) => ACTIVE.includes(app.items[id]?.status)) || (app.totals?.up ?? 0) > 0 || (app.totals?.down ?? 0) > 0);
 </script>
 
 <svelte:window onkeydown={onKey} ondragover={(e) => e.preventDefault()} ondrop={onDrop} />
@@ -191,7 +193,9 @@
       {:else}
         <Banners />
         <DownloadList />
-        {#if ui.details}<Details />{/if}
+        <!-- The details panel shows a selection, or the live overview while something is moving;
+             with nothing selected and nothing happening it stays out of the way. -->
+        {#if ui.details && (selection.size || busy)}<Details />{/if}
       {/if}
     </main>
   </div>

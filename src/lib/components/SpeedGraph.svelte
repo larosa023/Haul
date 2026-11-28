@@ -57,8 +57,8 @@
   const bw = $derived((W / slots) * 0.72);
   const bars = $derived(
     data.map((v, i) => {
-      const level = Math.ceil((v / top) * 8) / 8;
-      const h = Math.max(v > 0 ? 2 : 0, level * (height - 2));
+      const f = v / top;
+      const h = f > 0.02 ? Math.max(2, (Math.round(f * 8) / 8) * (height - 2)) : 0;
       return { x: ((slots - data.length + i) / slots) * W, h };
     }),
   );

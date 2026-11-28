@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.4.4
+
+- The details panel hides when nothing is selected and nothing is downloading or uploading, so the list gets the whole window. It comes back when something starts or when you select a download.
+- Blocks style: a near-zero speed no longer draws a stray bar in the corner of the graph.
+
 ## 0.4.3
 
 - The details panel follows your download tracking style too: the speed graph is a soft glow, a plain line, moving stripes, an aurora, retro bars, a hairline or neon, and the live card changes to match. The style tiles in Settings → Appearance preview the graph as well.
