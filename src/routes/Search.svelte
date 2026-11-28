@@ -47,19 +47,27 @@
     return list;
   });
 
+  let slow = $state(false);
+  let searched_for = $state(memo.q);
   async function run() {
     if (!q.trim() || loading) return;
     loading = true;
+    errors = [];
+    slow = false;
+    const t = setTimeout(() => (slow = true), 4000);
     try {
       const r = await api.searchTorrents(q.trim(), cat);
       hits = r.hits;
       errors = r.errors;
       searched = true;
+      searched_for = q.trim();
       Object.assign(memo, { q, cat, hits: r.hits, errors: r.errors, searched: true });
     } catch (e) {
       toast(errorText(e), 'error');
     } finally {
+      clearTimeout(t);
       loading = false;
+      slow = false;
     }
   }
 
@@ -121,12 +129,15 @@
     </div>
   {/if}
 
+  {#if loading && hits.length}
+    <div class="busy"><span class="spinner"></span>Searching for “{q.trim()}”…{#if slow}<span class="muted"> still working. The first search after starting can take up to a minute while FlareSolverr and Prowlarr wake up.</span>{/if}</div>
+  {/if}
   {#if hits.length}
-    <div class="tools">
+    <div class="tools" class:stale={loading}>
       <input class="input" bind:value={filter} placeholder="Filter results" spellcheck="false" />
-      <span class="muted small">{shown.length} result{shown.length === 1 ? '' : 's'}</span>
+      <span class="muted small">{shown.length} result{shown.length === 1 ? '' : 's'}{searched_for ? ` for “${searched_for}”` : ''}</span>
     </div>
-    <div class="table" role="table">
+    <div class="table" class:stale={loading} role="table">
       <div class="th" role="row">
         <button class="c-title" onclick={() => by('title')}>Name {#if sort === 'title'}<Icon name={desc ? 'down' : 'up'} size={12} />{/if}</button>
         <button class="c-size" onclick={() => by('size')}>Size {#if sort === 'size'}<Icon name={desc ? 'down' : 'up'} size={12} />{/if}</button>
@@ -160,7 +171,7 @@
       </div>
     </div>
   {:else if loading}
-    <div class="empty"><span class="spinner big"></span><span>Asking {sources} source{sources === 1 ? '' : 's'}…</span></div>
+    <div class="empty"><span class="spinner big"></span><span>Asking {sources} source{sources === 1 ? '' : 's'}…</span>{#if slow}<span class="muted">The first search after starting can take up to a minute while FlareSolverr and Prowlarr wake up.</span>{/if}</div>
   {:else if searched}
     <div class="empty"><Icon name="search" size={30} /><b>Nothing found</b><span class="muted">Try other words, or a different category.</span></div>
   {:else}
@@ -186,6 +197,8 @@
   .grow { flex: 1; }
   .link { display: inline-flex; align-items: center; gap: 5px; border: 0; background: none; color: var(--text-2); cursor: pointer; font-size: 12.5px; }
   .link:hover { color: var(--text); }
+  .busy { display: flex; align-items: center; gap: 8px; font-size: 12.5px; }
+  .stale { opacity: 0.35; pointer-events: none; transition: opacity 200ms; }
   .errs { display: flex; flex-wrap: wrap; gap: 4px 14px; font-size: 12px; color: var(--warn); }
   .errs span { display: inline-flex; align-items: center; gap: 4px; }
   .tools { display: flex; align-items: center; gap: 10px; }

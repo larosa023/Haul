@@ -192,6 +192,19 @@ fn api_url(ix: &Indexer) -> String {
     if u.ends_with("/api") || u.contains("/api?") || u.ends_with("/torznab") { u.to_string() } else { format!("{u}/api") }
 }
 
+/// "http://localhost:9696" for a Prowlarr Torznab URL like "http://localhost:9696/1/api".
+fn prowlarr_base(ix: &Indexer) -> Option<String> {
+    let u = url::Url::parse(ix.url.trim()).ok()?;
+    let segs: Vec<&str> = u.path_segments()?.filter(|s| !s.is_empty()).collect();
+    let looks = segs.len() >= 2 && segs[segs.len() - 1] == "api" && segs[segs.len() - 2].chars().all(|c| c.is_ascii_digit());
+    if !looks {
+        return None;
+    }
+    let prefix = segs[..segs.len() - 2].join("/");
+    let port = u.port().map(|p| format!(":{p}")).unwrap_or_default();
+    Some(format!("{}://{}{port}{}{prefix}", u.scheme(), u.host_str()?, if prefix.is_empty() { "" } else { "/" }))
+}
+
 async fn torznab(ix: &Indexer, q: &str, cat: &str) -> Result<Vec<Hit>, String> {
     let mut query = vec![("t", "search".to_string()), ("q", q.to_string())];
     if !ix.key.is_empty() {
@@ -201,8 +214,11 @@ async fn torznab(ix: &Indexer, q: &str, cat: &str) -> Result<Vec<Hit>, String> {
     if !c.is_empty() {
         query.push(("cat", c.into()));
     }
-    // Sites rate-limit busy searches (429): wait and try again, up to twice.
+    // 429 means the site is busy, or (with Prowlarr) that the indexer was benched after
+    // earlier failures, e.g. while FlareSolverr wasn't running yet. Wait and retry; for
+    // Prowlarr, ask it to re-test its indexers first, which un-benches the working ones.
     let mut tries = 0;
+    let mut retested = false;
     let r = loop {
         let r = crate::http::client()
             .get(api_url(ix))
@@ -211,6 +227,19 @@ async fn torznab(ix: &Indexer, q: &str, cat: &str) -> Result<Vec<Hit>, String> {
             .send()
             .await
             .map_err(|e| if e.is_timeout() { "took too long to answer".to_string() } else { format!("couldn't be reached ({}). Is Prowlarr running?", e.without_url()) })?;
+        if r.status().as_u16() == 429 && !retested && !ix.key.is_empty() {
+            if let Some(base) = prowlarr_base(ix) {
+                retested = true;
+                let key = crate::secret::open(&ix.key);
+                let _ = crate::http::client()
+                    .post(format!("{base}/api/v1/indexer/testall"))
+                    .header("X-Api-Key", key)
+                    .timeout(Duration::from_secs(90))
+                    .send()
+                    .await;
+                continue;
+            }
+        }
         if r.status().as_u16() == 429 && tries < 2 {
             tries += 1;
             let wait = r.headers().get("retry-after").and_then(|v| v.to_str().ok()).and_then(|v| v.parse::<u64>().ok()).unwrap_or(3).clamp(1, 8);
@@ -221,6 +250,7 @@ async fn torznab(ix: &Indexer, q: &str, cat: &str) -> Result<Vec<Hit>, String> {
     };
     match r.status().as_u16() {
         200..=299 => {}
+        429 if retested => return Err("is paused by Prowlarr after failing (Prowlarr's Status page says why; usually Cloudflare, so check FlareSolverr is running)".into()),
         429 => return Err("is limiting searches right now (too many in a short time); try again in a minute".into()),
         401 | 403 => return Err("didn't accept the API key".into()),
         s => return Err(format!("answered with an error ({s})")),
@@ -358,6 +388,14 @@ mod tests {
                 }
             }
         });
+    }
+
+    #[test]
+    fn finds_prowlarr_base() {
+        let ix = |u: &str| Indexer { url: u.into(), ..Default::default() };
+        assert_eq!(prowlarr_base(&ix("http://localhost:9696/1/api")).as_deref(), Some("http://localhost:9696"));
+        assert_eq!(prowlarr_base(&ix("http://nas:9696/prowlarr/12/api")).as_deref(), Some("http://nas:9696/prowlarr"));
+        assert_eq!(prowlarr_base(&ix("http://127.0.0.1:9117/api/v2.0/indexers/all/results/torznab/api")), None);
     }
 
     #[test]

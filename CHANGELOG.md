@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.4.5
+
+- Torrent search: while a search runs, the previous results fade out and Haul says what it's searching for (and why when it's slow), so old results can't be mistaken for new ones. The result count says which search it's for.
+- When Prowlarr has benched an indexer after failures (for example while FlareSolverr was still starting), Haul asks Prowlarr to re-test its indexers and searches again by itself. If it's still benched, the message says so in plain words.
+
 ## 0.4.4
 
 - The details panel hides when nothing is selected and nothing is downloading or uploading, so the list gets the whole window. It comes back when something starts or when you select a download.
