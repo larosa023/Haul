@@ -134,6 +134,7 @@ export interface Settings {
   flaresolverrPath: string;
   prowlarrAuto: boolean;
   prowlarrPath: string;
+  jackettAuto: boolean;
   searchIndexers: { name: string; url: string; key: string; enabled: boolean }[];
   autoUpdate: boolean;
   channel: 'stable' | 'beta';
@@ -388,6 +389,8 @@ export const api = {
   prowlarrStatus: () => call<ProwlarrStatus>('prowlarr_status'),
   prowlarrStart: () => call<ProwlarrStatus>('prowlarr_start'),
   prowlarrOpen: () => call<void>('prowlarr_open'),
+  jackettStatus: () => call<{ found: boolean; running: boolean; sites: number }>('jackett_status'),
+  jackettOpen: () => call<void>('jackett_open'),
   flaresolverrStatus: () => call<{ running: boolean; path: string }>('flaresolverr_status'),
   searchTorrents: (query: string, category: string) => call<SearchResults>('search_torrents', { query, category }),
   searchAdd: (link: string, debrid?: boolean) => call<{ id: number; existing: boolean }>('search_add', { link, debrid }),

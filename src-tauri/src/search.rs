@@ -38,7 +38,7 @@ pub struct Results {
 }
 
 /// Search categories, as Torznab numbers and Internet Archive media types.
-fn torznab_cat(cat: &str) -> &'static str {
+pub(crate) fn torznab_cat(cat: &str) -> &'static str {
     match cat {
         "movies" => "2000",
         "tv" => "5000",
@@ -84,7 +84,8 @@ pub async fn search(query: &str, cat: &str) -> Results {
     }
     let s = settings::get();
     let prowlarr_found = s.prowlarr_auto && crate::prowlarr::conn().is_some();
-    if prowlarr_found || s.search_indexers.iter().any(|i| i.enabled) {
+    let jackett_found = s.jackett_auto && crate::jackett::conn().is_some();
+    if prowlarr_found || jackett_found || s.search_indexers.iter().any(|i| i.enabled) {
         crate::flaresolverr::ensure().await;
     }
     let mut jobs: Vec<futures_util::future::BoxFuture<'static, (String, Result<Vec<Hit>, String>)>> = Vec::new();
@@ -92,7 +93,16 @@ pub async fn search(query: &str, cat: &str) -> Results {
         let (q, c) = (q.to_string(), cat.to_string());
         jobs.push(Box::pin(async move { ("Internet Archive".to_string(), archive(&q, &c).await) }));
     }
-    let px = if prowlarr_found { crate::prowlarr::ensure().await } else { None };
+    let (px, jx) = tokio::join!(
+        async { if prowlarr_found { crate::prowlarr::ensure().await } else { None } },
+        async { if jackett_found { crate::jackett::ensure().await } else { None } }
+    );
+    if let Some(conn) = jx.clone() {
+        let (q, c) = (q.to_string(), cat.to_string());
+        jobs.push(Box::pin(async move { ("Jackett".to_string(), crate::jackett::search(&conn, &q, &c).await) }));
+    } else if jackett_found {
+        jobs.push(Box::pin(async { ("Jackett".to_string(), Err("didn't start (open it once from the Start menu, then search again)".to_string())) }));
+    }
     if let Some(conn) = px.clone() {
         let (q, c) = (q.to_string(), cat.to_string());
         jobs.push(Box::pin(async move { ("Prowlarr".to_string(), crate::prowlarr::search(&conn, &q, &c).await) }));
@@ -100,9 +110,13 @@ pub async fn search(query: &str, cat: &str) -> Results {
         jobs.push(Box::pin(async { ("Prowlarr".to_string(), Err("didn't start (open it once from the Start menu, then search again)".to_string())) }));
     }
     // Links added by hand to the same Prowlarr are covered by the built-in search.
-    let same_prowlarr = |ix: &Indexer| match (&px, prowlarr_base(ix)) {
-        (Some(c), Some(b)) => b.replace("localhost", "127.0.0.1").trim_end_matches('/') == c.base.trim_end_matches('/'),
-        _ => false,
+    let same_prowlarr = |ix: &Indexer| {
+        let by_prowlarr = match (&px, prowlarr_base(ix)) {
+            (Some(c), Some(b)) => b.replace("localhost", "127.0.0.1").trim_end_matches('/') == c.base.trim_end_matches('/'),
+            _ => false,
+        };
+        let by_jackett = jx.as_ref().is_some_and(|c| ix.url.replace("localhost", "127.0.0.1").starts_with(&format!("{}/api/v2.0/indexers/", c.base)));
+        by_prowlarr || by_jackett
     };
     for ix in s.search_indexers.into_iter().filter(|i| i.enabled && !i.url.trim().is_empty()).filter(|i| !same_prowlarr(i)) {
         let (q, c) = (q.to_string(), cat.to_string());

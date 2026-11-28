@@ -848,6 +848,16 @@ pub async fn prowlarr_open() -> R<()> {
 }
 
 #[tauri::command]
+pub async fn jackett_status() -> crate::jackett::Status {
+    crate::jackett::status().await
+}
+
+#[tauri::command]
+pub async fn jackett_open() -> R<()> {
+    crate::jackett::open().await
+}
+
+#[tauri::command]
 pub async fn prowlarr_start() -> crate::prowlarr::Status {
     crate::prowlarr::start().await
 }

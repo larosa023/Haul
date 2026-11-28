@@ -160,6 +160,8 @@ pub struct Settings {
     /// Search through Prowlarr automatically (found on this PC, started hidden when needed).
     pub prowlarr_auto: bool,
     pub prowlarr_path: String,
+    /// Search through Jackett automatically, the same way.
+    pub jackett_auto: bool,
     // Debrid
     pub debrid_enabled: bool,
     /// The API key, encrypted for this Windows account (see secret.rs).
@@ -272,6 +274,7 @@ impl Default for Settings {
             flaresolverr_path: String::new(),
             prowlarr_auto: true,
             prowlarr_path: String::new(),
+            jackett_auto: true,
             debrid_enabled: true,
             debrid_key: String::new(),
             debrid_service: "realdebrid".into(),

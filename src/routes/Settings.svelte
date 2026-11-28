@@ -128,10 +128,18 @@
   let flare = $state<{ running: boolean; path: string } | null>(null);
   let prow = $state<ProwlarrStatus | null>(null);
   let prowBusy = $state(false);
+  let jack = $state<{ found: boolean; running: boolean; sites: number } | null>(null);
+  const jackText = $derived(
+    !jack ? 'Checking…'
+    : !jack.found ? 'Not installed. Optional: another app like Prowlarr with a different list of sites.'
+    : jack.running ? (jack.sites === 0 ? 'Connected · no sites yet. Click Add sites…, then “+ Add indexer” in Jackett.' : `Connected${jack.sites > 0 ? ` · ${jack.sites} site${jack.sites === 1 ? '' : 's'}` : ''} · Haul starts it hidden when you search`)
+    : 'Installed · not running right now. Haul starts it hidden when you search.'
+  );
   $effect(() => {
     if (ui.settingsTab === 'search' && isTauri) {
       void api.flaresolverrStatus().then((f) => (flare = f)).catch(() => {});
       void api.prowlarrStatus().then((p) => (prow = p)).catch(() => {});
+      void api.jackettStatus().then((j) => (jack = j)).catch(() => {});
     }
   });
   async function startProwlarr() {
@@ -760,7 +768,16 @@
             </div>
           </SettingRow>
         </div>
-        <p class="faint small">No links or keys to copy: Haul reads them from Prowlarr itself and searches every site you’ve added there. Sites Prowlarr has paused after errors are re-tested automatically.</p>
+        <h3>Jackett</h3>
+        <div class="group">
+          <SettingRow title="Search with Jackett" description={jackText} wide>
+            <div class="pathrow">
+              {#if jack?.found}<button class="btn sm ghost" onclick={() => api.jackettOpen().catch((e) => toast(String(e), 'error'))}>Add sites…</button>{/if}
+              <Switch checked={s.jackettAuto} label="Search with Jackett" onchange={(v) => set('jackettAuto', v)} />
+            </div>
+          </SettingRow>
+        </div>
+        <p class="faint small">No links or keys to copy: Haul reads them from Prowlarr and Jackett themselves and searches every site you’ve added there. Sites Prowlarr has paused after errors are re-tested automatically.</p>
         <h3>FlareSolverr</h3>
         <div class="group">
           <SettingRow title="Start FlareSolverr when searching" description={flare?.path ? `${flare.running ? 'Running' : 'Not running right now'} · ${flare.path}` : 'Lets Prowlarr get past Cloudflare checks. Haul starts it hidden (no window) before a search if it isn’t already running.'} wide>
@@ -772,7 +789,7 @@
         </div>
         <h3>Other sources (optional)</h3>
         <div class="group connect">
-          <p class="small">Prowlarr above needs nothing here. To add <button class="link" onclick={() => api.openLink('https://github.com/Jackett/Jackett')}>Jackett</button> or another Torznab feed, paste its feed URL (Jackett: <strong>Copy Torznab Feed</strong>, or the “All” feed) and the API key at the top of Jackett’s page.</p>
+          <p class="small">Prowlarr and Jackett above need nothing here. This is only for another Torznab feed: paste its URL and API key.</p>
           <div class="ixform">
             <input class="input" bind:value={ixName} placeholder="Name (optional)" spellcheck="false" />
             <input class="input mono" bind:value={ixUrl} placeholder="Torznab URL" spellcheck="false" />

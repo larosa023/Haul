@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.4.8
+
+- Jackett is built in too, the same way as Prowlarr: Haul finds it, reads its key, starts it hidden when you search and searches every site you've added in it (its "all" feed). Settings → Torrent search shows how many sites it has, with an **Add sites…** button.
+- If Jackett has no FlareSolverr address set (and no admin password), Haul fills in FlareSolverr's address for it.
+
 ## 0.4.7
 
 - Settings → Torrent search: **Add sites…** opens Prowlarr's page again (the click did nothing because Haul only opened https links). It starts Prowlarr first if it isn't running.

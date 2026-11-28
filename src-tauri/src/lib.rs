@@ -7,6 +7,7 @@ mod secret;
 mod engine;
 mod flaresolverr;
 mod prowlarr;
+mod jackett;
 mod extract;
 mod ftp;
 mod grab;
@@ -305,6 +306,8 @@ pub fn run() {
             commands::prowlarr_status,
             commands::prowlarr_start,
             commands::prowlarr_open,
+            commands::jackett_status,
+            commands::jackett_open,
             commands::search_add,
             commands::search_add_indexer,
             commands::search_remove_indexer,
