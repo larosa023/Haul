@@ -6,7 +6,7 @@
   import SegmentMap from './SegmentMap.svelte';
   import Safety from './Safety.svelte';
   import { api, type Item, type TorrentFile } from '../api';
-  import { app, ui, history, selectedItems, toast, errorText } from '../state.svelte';
+  import { app, ui, history, selection, selectedItems, toast, errorText } from '../state.svelte';
   import { bytes, date, duration, percent, statusLabel, speed, eta } from '../format.js';
 
   const sel = $derived(selectedItems());
@@ -126,7 +126,40 @@
 <section class="details" style="height: {height}px">
   <div class="grip" role="separator" aria-orientation="horizontal" onpointerdown={drag}></div>
   {#if !sel.length}
-    <div class="none muted">Select a download to see its details.</div>
+    {@const all = app.order.map((id) => app.items[id]).filter(Boolean)}
+    {@const active = all.filter((i) => i.status === 'downloading')}
+    {@const queued = all.filter((i) => i.status === 'queued').length}
+    {@const seeding = all.filter((i) => i.status === 'seeding').length}
+    {@const doneToday = all.filter((i) => i.status === 'completed' && i.finishedAt && Date.now() / 1000 - i.finishedAt < 86400)}
+    {@const peakAll = history.total.length ? Math.max(...history.total) : 0}
+    <div class="overview">
+      <div class="livecard ov">
+        <div class="lhead">
+          <span class="big">{speed(app.totals?.down ?? 0) || '0 B/s'}</span>
+          <span class="muted lsub">↑ {speed(app.totals?.up ?? 0) || '0 B/s'}</span>
+        </div>
+        <div class="gwrap"><SpeedGraph data={history.total} up={history.up} height={90} /></div>
+        <div class="stats">
+          <span>Peak <b>{speed(peakAll) || '—'}</b></span>
+          <span>{active.length} downloading{queued ? ` · ${queued} queued` : ''}{seeding ? ` · ${seeding} seeding` : ''}</span>
+          <span>Today <b>{doneToday.length} done · {bytes(doneToday.reduce((n, i) => n + (i.size || 0), 0))}</b></span>
+        </div>
+      </div>
+      {#if active.length}
+        <div class="ovlist">
+          {#each active.slice(0, 6) as a (a.id)}
+            <button class="ovrow" onclick={() => { selection.clear(); selection.add(a.id); }} title="Show details">
+              <span class="nm">{a.name}</span>
+              <span class="pgv run"><span class="bar"><span class="fill" style="width: {percent(a.done, a.size)}%"></span></span></span>
+              <span class="sp">{speed(a.speedDown)}</span>
+            </button>
+          {/each}
+          {#if active.length > 6}<span class="faint more">+{active.length - 6} more</span>{/if}
+        </div>
+      {:else}
+        <div class="muted ovhint">Nothing downloading right now. Select a download to see its details.</div>
+      {/if}
+    </div>
   {:else}
     <div class="tabs">
       {#if it}
@@ -301,7 +334,16 @@
   .details { position: relative; flex-shrink: 0; display: flex; flex-direction: column; margin: 0 12px 12px; border: 1px solid var(--line); border-radius: 0 0 8px 8px; background: var(--surface); min-height: 0; }
   .grip { position: absolute; top: -4px; left: 0; right: 0; height: 8px; cursor: ns-resize; z-index: 2; }
   .grip:hover { background: linear-gradient(transparent 3px, var(--accent) 3px, var(--accent) 5px, transparent 5px); }
-  .none { margin: auto; }
+  .overview { flex: 1; min-height: 0; display: grid; grid-template-columns: minmax(320px, 1.3fr) minmax(240px, 1fr); gap: 18px; padding: 14px 18px; overflow: auto; }
+  .ov { align-self: start; }
+  .ov .stats { flex-wrap: wrap; }
+  .ovlist { display: flex; flex-direction: column; gap: 4px; align-self: start; }
+  .ovrow { display: grid; grid-template-columns: minmax(0, 1fr) 110px 74px; align-items: center; gap: 10px; padding: 7px 10px; border: 0; border-radius: 7px; background: none; color: var(--text); cursor: pointer; text-align: left; font-size: 12.5px; }
+  .ovrow:hover { background: var(--surface-hover); }
+  .ovrow .nm { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .ovrow .sp { text-align: right; color: var(--text-2); font-variant-numeric: tabular-nums; }
+  .more { font-size: 11.5px; padding-left: 10px; }
+  .ovhint { align-self: center; font-size: 13px; }
   .tabs { display: flex; align-items: center; gap: 2px; padding: 4px 6px 0 8px; border-bottom: 1px solid var(--line); }
   .tabs button:not(.icon-btn) { border: 0; background: none; padding: 8px 12px; cursor: pointer; color: var(--text-2); font-weight: 600; font-size: 12.5px; border-bottom: 2px solid transparent; }
   .tabs button.on { color: var(--text); border-bottom-color: var(--accent); }

@@ -84,3 +84,30 @@
 @media (prefers-reduced-motion: reduce) {
   [data-progress] .fill { animation: none !important; }
 }
+
+/* The live card in the details panel follows the style too. */
+@scope ([data-progress='classic']) {
+  .livecard.livecard { background: var(--surface); box-shadow: none; }
+}
+@scope ([data-progress='striped']) {
+  .livecard.livecard { background: repeating-linear-gradient(-45deg, color-mix(in srgb, var(--accent) 5%, var(--bg)) 0 10px, var(--bg) 10px 20px); }
+}
+@scope ([data-progress='aurora']) {
+  .livecard.livecard {
+    border-color: transparent;
+    background: linear-gradient(var(--bg), var(--bg)) padding-box, linear-gradient(120deg, var(--accent), color-mix(in oklch, var(--accent), #ff4fd8 60%), color-mix(in oklch, var(--accent), #3ce0ff 60%), var(--accent)) border-box;
+    background-size: 100% 100%, 300% 100%;
+    animation: haul-aurora 6s linear infinite;
+  }
+}
+@scope ([data-progress='blocks']) {
+  .livecard.livecard { border-radius: 3px; background: var(--bg); box-shadow: inset 0 0 0 1px var(--line); }
+  .livecard.livecard .big { font-family: var(--mono); letter-spacing: 0; }
+}
+@scope ([data-progress='minimal']) {
+  .livecard.livecard { background: transparent; border-color: transparent; padding-left: 0; padding-right: 0; }
+}
+@scope ([data-progress='neon']) {
+  .livecard.livecard { background: color-mix(in srgb, var(--bg) 85%, #000); border-color: color-mix(in srgb, var(--accent) 55%, transparent); box-shadow: 0 0 14px color-mix(in srgb, var(--accent) 22%, transparent), inset 0 0 18px color-mix(in srgb, var(--accent) 8%, transparent); }
+  .livecard.livecard .big { color: color-mix(in srgb, var(--accent) 60%, #fff); text-shadow: 0 0 8px var(--accent); }
+}

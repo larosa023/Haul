@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import SpeedGraph from '../lib/components/SpeedGraph.svelte';
   import Icon from '../lib/components/Icon.svelte';
   import SettingRow from '../lib/components/SettingRow.svelte';
   import Switch from '../lib/components/Switch.svelte';
@@ -119,6 +120,9 @@
     app.settings = await api.hfDisconnect();
     hfUser = '';
   }
+
+  // A made-up speed curve for the style previews.
+  const SAMPLE = Array.from({ length: 48 }, (_, i) => 40 + 30 * Math.sin(i / 4) + 18 * Math.sin(i / 1.7) + (i > 30 ? 25 : 0));
 
   // ---- torrent search sources
   let flare = $state<{ running: boolean; path: string } | null>(null);
@@ -828,6 +832,7 @@
                 <span class="bar"><span class="fill" style="width: {[72, 58, 64, 81, 47, 69, 55][n]}%"></span></span>
                 <span class="bar"><span class="fill" style="width: {[38, 87, 29, 52, 76, 33, 90][n]}%"></span></span>
               </span>
+              <span class="pvg"><SpeedGraph data={SAMPLE} height={34} variant={id} dot={false} /></span>
               <span class="pvl"><span>{name}</span><small>{hint}</small></span>
             </button>
           {/each}
@@ -940,6 +945,7 @@
   .ps { display: flex; flex-direction: column; gap: 9px; padding: 12px 12px 10px; border-radius: 10px; border: 1px solid var(--line); background: var(--surface); cursor: pointer; text-align: left; color: var(--text); transition: border-color var(--dur), background var(--dur); }
   .ps:hover { background: var(--surface-hover); }
   .ps.on { border-color: var(--accent); box-shadow: 0 0 0 1px var(--accent) inset; }
+  .ps .pvg { position: relative; display: block; margin: 2px 0 -2px; }
   .ps .pvl { display: flex; flex-direction: column; gap: 1px; font-size: 12.5px; font-weight: 600; }
   .ps .pvl small { color: var(--text-3); font-size: 11px; font-weight: 400; }
   .connect p { margin: 0 0 8px; }

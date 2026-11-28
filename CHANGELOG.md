@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.4.3
+
+- The details panel follows your download tracking style too: the speed graph is a soft glow, a plain line, moving stripes, an aurora, retro bars, a hairline or neon, and the live card changes to match. The style tiles in Settings → Appearance preview the graph as well.
+- With nothing selected, the details panel shows a live overview instead of an empty space: total speed with a graph, peak, what's downloading, queued and seeding, what finished today, and the active downloads (click one to open it).
+
 ## 0.4.2
 
 - Torrent search: PC and console games are labelled **Games** (they showed as Software).
